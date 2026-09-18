@@ -1,0 +1,32 @@
+# Core audio and speech
+SpeechRecognition>=3.10.0
+sounddevice>=0.4.6
+numpy>=1.26.0
+
+# Neural Voice & Speech Synthesis
+edge-tts>=6.1.12
+
+# System and OS Automation
+pywin32>=306
+pyautogui>=0.9.54
+pywinctl>=0.3.0
+pygetwindow>=0.0.9
+psutil>=5.9.8
+pyperclip>=1.8.2
+
+# AI Models & Local Inference
+ollama>=0.3.0
+openjarvis>=1.0.0
+
+# Screen Capture, Vision and Perception
+mss>=9.0.1
+Pillow>=10.2.0
+pytesseract>=0.3.10
+
+# Media Automation & Video ID Discovery
+yt-dlp>=2024.0.0
+requests>=2.31.0
+
+# Document Processing (optional)
+python-docx>=1.1.0
+pypdf>=4.0.0
