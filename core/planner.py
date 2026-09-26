@@ -2711,6 +2711,20 @@ class ActionPlanner:
                     .strip()
                 )
 
+        # Direct folder mentions (e.g. "downloaded file", "recent download", "in downloads")
+        if "download" in lower:
+            return "downloads"
+        if "desktop" in lower:
+            return "desktop"
+        if "document" in lower:
+            return "documents"
+        if "picture" in lower or "photo" in lower or "image" in lower:
+            return "pictures"
+        if "video" in lower or "movie" in lower:
+            return "videos"
+        if "music" in lower or "song" in lower:
+            return "music"
+
         return None
 
     def _extract_extension(

@@ -379,3 +379,196 @@ def list_project_files(folder_query: str | None = None) -> dict[str, Any]:
         "spoken": spoken,
     }
 
+
+def get_recent_downloads(limit: int = 5) -> dict[str, Any]:
+    """Retrieve and naturally describe recently downloaded files from the Downloads folder."""
+    from datetime import datetime
+    user_home = Path.home()
+    candidates = [
+        user_home / "Downloads",
+        user_home / "OneDrive" / "Downloads",
+        Path("C:/Users/joshi/Downloads"),
+    ]
+    downloads_dir = None
+    for c in candidates:
+        if c.is_dir():
+            downloads_dir = c
+            break
+
+    if not downloads_dir:
+        return {
+            "success": False,
+            "spoken": "I could not locate your Downloads folder, sir.",
+            "display": "⚠️ Could not locate Downloads directory.",
+            "files": []
+        }
+
+    valid_files: list[tuple[Path, os.stat_result]] = []
+    try:
+        for entry in downloads_dir.iterdir():
+            if not entry.is_file():
+                continue
+            name = entry.name
+            if name.startswith((".", "~")) or name.lower() == "desktop.ini":
+                continue
+            ext = entry.suffix.lower()
+            if ext in (".tmp", ".crdownload", ".part", ".download"):
+                continue
+            try:
+                st = entry.stat()
+                valid_files.append((entry, st))
+            except OSError:
+                continue
+    except Exception as exc:
+        return {
+            "success": False,
+            "spoken": f"I had trouble reading the Downloads folder: {exc}",
+            "display": f"⚠️ Error accessing Downloads: {exc}",
+            "files": []
+        }
+
+    if not valid_files:
+        return {
+            "success": True,
+            "spoken": "Your Downloads folder is currently empty, sir.",
+            "display": "📁 **Downloads folder is empty.**",
+            "files": []
+        }
+
+    valid_files.sort(key=lambda item: item[1].st_mtime, reverse=True)
+    top_files = valid_files[:limit]
+
+    def _fmt_size(sz: int) -> str:
+        if sz < 1024:
+            return f"{sz} B"
+        elif sz < 1024 * 1024:
+            return f"{sz / 1024:.1f} KB"
+        elif sz < 1024 * 1024 * 1024:
+            return f"{sz / (1024 * 1024):.1f} MB"
+        return f"{sz / (1024 * 1024 * 1024):.1f} GB"
+
+    def _fmt_date(mtime: float) -> str:
+        dt = datetime.fromtimestamp(mtime)
+        now = datetime.now()
+        diff = now - dt
+        if diff.days == 0:
+            return f"today at {dt.strftime('%I:%M %p').lstrip('0')}"
+        elif diff.days == 1:
+            return f"yesterday at {dt.strftime('%I:%M %p').lstrip('0')}"
+        elif diff.days < 7:
+            return f"on {dt.strftime('%A at %I:%M %p').lstrip('0')}"
+        return f"on {dt.strftime('%b %d')}"
+
+    most_recent = top_files[0]
+    m_name = most_recent[0].name
+    m_size = _fmt_size(most_recent[1].st_size)
+    m_date = _fmt_date(most_recent[1].st_mtime)
+
+    spoken_parts = [f"Your most recent downloaded file is {m_name} ({m_size}), downloaded {m_date}."]
+    if len(top_files) > 1:
+        other_names = [f[0].name for f in top_files[1:3]]
+        spoken_parts.append(f"You also recently downloaded {', and '.join(other_names)}.")
+
+    spoken = " ".join(spoken_parts)
+
+    display_lines = ["📁 **Recent Downloads:**\n"]
+    for i, (path, st) in enumerate(top_files, 1):
+        display_lines.append(f"{i}. **{path.name}** ({_fmt_size(st.st_size)}) &mdash; *{_fmt_date(st.st_mtime)}*")
+
+    display = "\n".join(display_lines)
+
+    return {
+        "success": True,
+        "spoken": spoken,
+        "display": display,
+        "most_recent_path": str(most_recent[0]),
+        "files": [{"path": str(p), "name": p.name, "size": st.st_size} for p, st in top_files]
+    }
+
+
+def get_recent_user_files(limit: int = 5) -> dict[str, Any]:
+    """Retrieve recent user files across Desktop, Documents, Downloads, and Projects."""
+    from datetime import datetime
+    user_home = Path.home()
+    search_dirs = [
+        user_home / "Desktop",
+        user_home / "Documents",
+        user_home / "Downloads",
+        user_home / "Projects",
+        PROJECT_ROOT,
+    ]
+
+    all_files: list[tuple[Path, os.stat_result]] = []
+    ignored_exts = {".log", ".db", ".vscdb", ".sqlite", ".tmp", ".crdownload", ".bak", ".ini"}
+    ignored_parts = {"appdata", ".vscode", ".git", "node_modules", "__pycache__", "breadcrumbs"}
+
+    for s_dir in search_dirs:
+        if not s_dir.is_dir():
+            continue
+        try:
+            for root, dirs, files in os.walk(s_dir):
+                # Prune hidden & system dirs
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in ignored_parts]
+                if any(ig in root.lower() for ig in ignored_parts):
+                    continue
+                for fname in files:
+                    if fname.startswith((".", "~")):
+                        continue
+                    p = Path(root) / fname
+                    if p.suffix.lower() in ignored_exts:
+                        continue
+                    try:
+                        st = p.stat()
+                        all_files.append((p, st))
+                    except OSError:
+                        continue
+        except Exception:
+            continue
+
+    if not all_files:
+        return {
+            "success": True,
+            "spoken": "I did not find any recently modified project or personal files, sir.",
+            "display": "📁 **No recent files found.**",
+            "files": []
+        }
+
+    all_files.sort(key=lambda item: item[1].st_mtime, reverse=True)
+    top_files = all_files[:limit]
+
+    def _fmt_size(sz: int) -> str:
+        if sz < 1024:
+            return f"{sz} B"
+        elif sz < 1024 * 1024:
+            return f"{sz / 1024:.1f} KB"
+        return f"{sz / (1024 * 1024):.1f} MB"
+
+    def _fmt_date(mtime: float) -> str:
+        dt = datetime.fromtimestamp(mtime)
+        now = datetime.now()
+        diff = now - dt
+        if diff.days == 0:
+            return f"today at {dt.strftime('%I:%M %p').lstrip('0')}"
+        elif diff.days == 1:
+            return f"yesterday at {dt.strftime('%I:%M %p').lstrip('0')}"
+        return f"on {dt.strftime('%b %d')}"
+
+    most_recent = top_files[0]
+    spoken = f"Your most recently active file is {most_recent[0].name}, modified {_fmt_date(most_recent[1].st_mtime)}."
+    if len(top_files) > 1:
+        spoken += f" Other recent files include {', and '.join(f[0].name for f in top_files[1:3])}."
+
+    display_lines = ["📁 **Recently Active Files:**\n"]
+    for i, (path, st) in enumerate(top_files, 1):
+        display_lines.append(f"{i}. **{path.name}** ({_fmt_size(st.st_size)}) &mdash; *{_fmt_date(st.st_mtime)}*")
+
+    display = "\n".join(display_lines)
+
+    return {
+        "success": True,
+        "spoken": spoken,
+        "display": display,
+        "most_recent_path": str(most_recent[0]),
+        "files": [{"path": str(p), "name": p.name, "size": st.st_size} for p, st in top_files]
+    }
+

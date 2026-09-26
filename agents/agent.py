@@ -206,15 +206,11 @@ class ComputerAgent:
 
         lower = text.lower()
 
-        # "what did I download last week / month / recently?" -> real Downloads listing
-        if any(w in lower for w in ("downloaded", "download last", "download this week",
-                                    "download this month", "recent download")):
-            from tools.files import find_recent_files
-            dl = resolve_known_folder("downloads")
-            if dl:
-                days = self._infer_days(lower)
-                return True, find_recent_files(dl, days=days, limit=12)
-            return True, "I couldn't locate your Downloads folder."
+        # "what did I download / recent downloads?" -> natural intelligent Downloads retrieval
+        if "download" in lower or any(w in lower for w in ("downloaded", "download last", "recent download", "download files")):
+            from tools.smart_files import get_recent_downloads
+            res = get_recent_downloads(limit=8)
+            return True, res.get("spoken", "I could not locate your Downloads folder.")
 
         # If the user mentions a known folder, list it instead of screen observation
         for folder_name in ("downloads", "documents", "desktop", "pictures", "videos", "music"):

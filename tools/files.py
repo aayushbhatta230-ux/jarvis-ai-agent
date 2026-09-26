@@ -175,10 +175,20 @@ def find_recent_files(directory: str | None = None, days: int = 7,
     cutoff = datetime.now().timestamp() - (days * 86400)
     results: list[dict[str, Any]] = []
 
+    ignored_exts = {".log", ".db", ".vscdb", ".sqlite", ".tmp", ".crdownload", ".bak", ".ini", ".lock"}
+    ignored_parts = {"appdata", ".vscode", ".git", "node_modules", "__pycache__", "breadcrumbs"}
+
     try:
-        for root, _dirs, files in os.walk(search_dir):
+        for root, dirs, files in os.walk(search_dir):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in ignored_parts]
+            if any(ig in root.lower() for ig in ignored_parts):
+                continue
             for name in files:
+                if name.startswith((".", "~")):
+                    continue
                 full_path = Path(root) / name
+                if full_path.suffix.lower() in ignored_exts:
+                    continue
                 if extension and not name.lower().endswith(extension.lower()):
                     continue
                 try:
