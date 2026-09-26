@@ -4,6 +4,7 @@
 ### Autonomous Local-First AI Computer Companion & Remote Control Agent
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![CI: Passing](https://img.shields.io/badge/CI-Passing-10b981?style=flat&logo=githubactions&logoColor=white)](https://github.com/aayushbhatta230-ux/jarvis-ai-agent/actions)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2011%20%7C%2010-0078D6.svg)](https://microsoft.com/windows)
 [![LLM: Ollama](https://img.shields.io/badge/LLM-Llama%203.2%20(Local)-orange.svg)](https://ollama.com)
@@ -17,7 +18,11 @@
 
 ## 🌟 Key Highlights
 
-- 🧠 **100% Local Intelligence**: Powered by Ollama (`llama3.2`) — your conversations, code, and system commands never leave your personal machine.
+- 🧠 **100% Local Intelligence**: Powered by Ollama (`llama3.2`) and Neural Vector Memory — your conversations, code, and system commands never leave your personal machine.
+- ⏰ **Smart Alarms & Countdown Timers**: Background thread engine managing precision timers, reminders, and voice notifications.
+- 🐙 **Git Intelligence & Remote Sync**: Conversational git status auditor, commit log explorer, and automated one-shot commit/push pipeline.
+- 🔍 **Resilient Web Researcher**: DuckDuckGo instant knowledge retrieval with automatic offline LLM fallback.
+- 📋 **Windows Clipboard & Code Intelligence**: Native OS clipboard reading/writing and deep workspace source code inspection.
 - 📱 **Mobile Remote & PWA Companion**:
   - Full-screen real-time **laptop screen mirroring** streamed straight to your phone.
   - **Remote Touchpad & Navigation**: Scroll, tap, drag, select text, and send keystrokes from your phone.
@@ -33,7 +38,7 @@
   - Deep song resolution via `yt_dlp` without relying on search listings.
   - Autonomous cursor gliding and physical click execution on player controls.
 - 🛡️ **Gated Safety Execution Model**:
-  - 35+ capabilities categorized by risk levels (`low`, `medium`, `high`).
+  - 40+ capabilities categorized by risk levels (`low`, `medium`, `high`).
   - Gated confirmation before any destructive file or system modifications.
 - ✨ **Celestial Hologram Visualizer**:
   - Interactive 3D WebGL particle hologram that reacts dynamically to agent thinking and speech states.

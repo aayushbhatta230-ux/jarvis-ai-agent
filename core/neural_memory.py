@@ -99,33 +99,54 @@ class NeuralEmbedder:
     def __init__(self) -> None:
         self.projector = NeuralSubwordProjector()
         self.provider_name = "Neural Subword Projector (Local)"
+        self._cache: dict[str, np.ndarray] = {}
         self._check_available_providers()
 
     def _check_available_providers(self) -> None:
-        # Check if Ollama has an active embedding model
-        try:
-            req = urllib.request.Request(
-                "http://127.0.0.1:11434/api/tags",
-                headers={"User-Agent": "JARVIS"},
-            )
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                models = [m.get("name", "") for m in data.get("models", [])]
-                for m in models:
-                    if "embed" in m or "minilm" in m:
-                        self.provider_name = f"Ollama ({m})"
-                        return
-        except Exception:
-            pass
+        # Check if Ollama embedding is explicitly enabled
+        if os.environ.get("ENABLE_OLLAMA_EMBED") == "1":
+            try:
+                req = urllib.request.Request(
+                    "http://127.0.0.1:11434/api/tags",
+                    headers={"User-Agent": "JARVIS"},
+                )
+                with urllib.request.urlopen(req, timeout=1.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    models = [m.get("name", "") for m in data.get("models", [])]
+                    for m in models:
+                        if "embed" in m or "minilm" in m:
+                            self.provider_name = f"Ollama ({m})"
+                            return
+            except Exception:
+                pass
 
         # Check if OpenAI API key is present
         if os.environ.get("OPENAI_API_KEY") and not os.environ["OPENAI_API_KEY"].startswith("your_"):
             self.provider_name = "OpenAI (text-embedding-3-small)"
 
+    def _normalize_dim(self, arr: np.ndarray) -> np.ndarray:
+        """Guarantee vector matches EMBEDDING_DIM precisely with unit norm."""
+        if len(arr) != EMBEDDING_DIM:
+            if len(arr) > EMBEDDING_DIM:
+                step = len(arr) // EMBEDDING_DIM
+                arr = arr[: EMBEDDING_DIM * step].reshape(EMBEDDING_DIM, step).mean(axis=1).astype(np.float32)
+            else:
+                padded = np.zeros(EMBEDDING_DIM, dtype=np.float32)
+                padded[:len(arr)] = arr
+                arr = padded
+        norm = float(np.linalg.norm(arr))
+        return (arr / norm if norm > 1e-6 else arr).astype(np.float32)
+
     def embed(self, text: str) -> np.ndarray:
-        """Produce normalized dense vector embedding."""
+        """Produce normalized dense vector embedding with memory cache."""
         if not text or not text.strip():
             return np.zeros(EMBEDDING_DIM, dtype=np.float32)
+
+        cached = self._cache.get(text)
+        if cached is not None:
+            return cached
+
+        arr: np.ndarray | None = None
 
         # 1. Try Ollama embedding if nomic-embed-text or minilm is loaded
         if "Ollama" in self.provider_name:
@@ -137,31 +158,33 @@ class NeuralEmbedder:
                     data=payload,
                     headers={"Content-Type": "application/json"},
                 )
-                with urllib.request.urlopen(req, timeout=3.0) as resp:
+                with urllib.request.urlopen(req, timeout=1.5) as resp:
                     res = json.loads(resp.read().decode("utf-8"))
                     raw = res.get("embedding")
                     if raw:
                         arr = np.array(raw, dtype=np.float32)
-                        norm = float(np.linalg.norm(arr))
-                        return arr / norm if norm > 1e-6 else arr
             except Exception:
                 pass
 
         # 2. Try OpenAI embedding if key present
-        if "OpenAI" in self.provider_name:
+        if arr is None and "OpenAI" in self.provider_name:
             try:
                 import openai
                 client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
                 resp = client.embeddings.create(model="text-embedding-3-small", input=text[:2000])
                 raw = resp.data[0].embedding
                 arr = np.array(raw, dtype=np.float32)
-                norm = float(np.linalg.norm(arr))
-                return arr / norm if norm > 1e-6 else arr
             except Exception:
                 pass
 
-        # 3. Always dependable, fast local subword neural projector
-        return self.projector.encode(text)
+        # 3. Always dependable, lightning-fast local subword neural projector
+        if arr is None:
+            arr = self.projector.encode(text)
+
+        normed = self._normalize_dim(arr)
+        if len(self._cache) < 2048:
+            self._cache[text] = normed
+        return normed
 
 
 class NeuralMemory:

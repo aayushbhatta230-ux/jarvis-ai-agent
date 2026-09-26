@@ -88,13 +88,19 @@ class NeuralIntentRouter:
         ],
     }
 
+    _PROTOTYPE_CACHE: dict[str, np.ndarray] = {}
+
     def __init__(self) -> None:
         self.memory = get_neural_memory()
         self.prototypes: dict[str, np.ndarray] = {}
         self._build_prototype_centroids()
 
     def _build_prototype_centroids(self) -> None:
-        """Precompute normalized centroid embeddings for each intent cluster."""
+        """Precompute normalized centroid embeddings for each intent cluster with class-level caching."""
+        if NeuralIntentRouter._PROTOTYPE_CACHE:
+            self.prototypes = dict(NeuralIntentRouter._PROTOTYPE_CACHE)
+            return
+
         for intent_name, examples in self.INTENT_PROTOTYPES.items():
             vecs = [self.memory.embedder.embed(ex) for ex in examples]
             centroid = np.mean(vecs, axis=0)
@@ -102,6 +108,8 @@ class NeuralIntentRouter:
             if norm > 1e-6:
                 centroid /= norm
             self.prototypes[intent_name] = centroid
+
+        NeuralIntentRouter._PROTOTYPE_CACHE = dict(self.prototypes)
 
     def classify(self, text: str, threshold: float = 0.12) -> tuple[str | None, float, dict[str, Any]]:
         """Classify user query into best-matching intent and confidence score."""
