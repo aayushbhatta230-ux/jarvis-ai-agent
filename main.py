@@ -44,7 +44,30 @@ def _bind_server(manager: ConversationManager, settings: Settings, history: Hist
 	raise RuntimeError(f"Could not bind a web port ({PORTS[0]}-{PORTS[-1]}).") from last_error
 
 
+def keep_system_awake() -> None:
+	"""Prevent Windows from sleeping while JARVIS is running."""
+	import sys
+	if sys.platform != "win32":
+		return
+	import ctypes
+	import time
+	ES_CONTINUOUS = 0x80000000
+	ES_SYSTEM_REQUIRED = 0x00000001
+	ES_DISPLAY_REQUIRED = 0x00000002
+	def _awake_loop():
+		while True:
+			try:
+				ctypes.windll.kernel32.SetThreadExecutionState(
+					ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+				)
+			except Exception:
+				pass
+			time.sleep(40)
+	Thread(target=_awake_loop, name="jarvis-stay-awake", daemon=True).start()
+
+
 def main() -> None:
+	keep_system_awake()
 	print("JARVIS v0.1 ready. Press Ctrl+C to stop.")
 	settings = Settings()
 	history = HistoryStore()
