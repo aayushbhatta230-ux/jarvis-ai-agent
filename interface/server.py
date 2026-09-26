@@ -255,6 +255,36 @@ class JarvisHandler(BaseHTTPRequestHandler):
 			except Exception as exc:
 				self._send_json(500, {"ok": False, "error": str(exc)})
 			return
+		if path == "/api/timers":
+			try:
+				from tools.smart_alarms import get_alarm_manager
+				self._send_json(200, {"ok": True, "timers": get_alarm_manager().list_timers()})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+		if path == "/api/git/status":
+			try:
+				from tools.git_intel import get_git_status, get_recent_commits
+				self._send_json(200, {"ok": True, "status": get_git_status(), "commits": get_recent_commits(limit=5)})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+		if path == "/api/clipboard":
+			try:
+				from tools.clipboard_intel import inspect_clipboard
+				self._send_json(200, {"ok": True, **inspect_clipboard()})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+		if path == "/api/research":
+			query_params = parse_qs(parsed.query)
+			q = query_params.get("q", [""])[0].strip()
+			try:
+				from tools.web_researcher import research_topic
+				self._send_json(200, research_topic(q))
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
 		if path.startswith(("/api/", "/events")):
 			self._send_json(404, {"error": "unknown endpoint"})
 			return
@@ -829,6 +859,39 @@ class JarvisHandler(BaseHTTPRequestHandler):
 				from tools.smart_notes import get_notes_manager
 				note = get_notes_manager().add_note(content, title=title)
 				self._send_json(200, {"ok": True, "note": note})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+
+		if path == "/api/timers":
+			body = _json_body(self) or {}
+			mins = float(body.get("minutes") or 5.0)
+			label = (body.get("label") or "Timer").strip()
+			try:
+				from tools.smart_alarms import get_alarm_manager
+				item = get_alarm_manager().set_timer(mins, label=label)
+				self._send_json(200, {"ok": True, "timer": item.to_dict()})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+
+		if path == "/api/git/commit":
+			body = _json_body(self) or {}
+			msg = (body.get("message") or "chore: quick update by JARVIS").strip()
+			try:
+				from tools.git_intel import quick_commit_and_push
+				self._send_json(200, quick_commit_and_push(msg))
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+
+		if path == "/api/clipboard":
+			body = _json_body(self) or {}
+			text = (body.get("text") or "").strip()
+			try:
+				from tools.clipboard_intel import set_clipboard_text
+				ok = set_clipboard_text(text)
+				self._send_json(200, {"ok": ok})
 			except Exception as exc:
 				self._send_json(500, {"ok": False, "error": str(exc)})
 			return

@@ -106,6 +106,27 @@ class ConversationManager:
 		self.short_term = get_short_term_memory()
 		self._email_flow: dict | None = None
 
+		# Register alarm manager completion hook
+		try:
+			from tools.smart_alarms import get_alarm_manager
+			get_alarm_manager().register_done_hook(self._on_timer_completed)
+		except Exception:
+			pass
+
+	def _on_timer_completed(self, timer_item) -> None:
+		msg = f"Sir, your timer for '{timer_item.label}' is complete."
+		self._emit_message("assistant", f"⏰ **Timer Complete**: {timer_item.label}")
+		try:
+			if hasattr(self, "events") and self.events:
+				self.events.emit({
+					"type": "timer_done",
+					"label": timer_item.label,
+					"message": msg,
+				})
+		except Exception:
+			pass
+		self._speak_plain(msg)
+
 	# ------------------------------------------------------------------ #
 	# Public API (thread-safe)
 	# ------------------------------------------------------------------ #
@@ -1420,6 +1441,93 @@ class ConversationManager:
 						return f"Clicked on {elem_name} at screen coordinates ({cx}, {cy}), sir."
 				except Exception as ground_err:
 					print(f"[GROUNDING] Notice: {ground_err}")
+
+		# 4g. Smart Alarms & Countdown Timers
+		timer_set_match = re.search(r"^(?:set\s+(?:a\s+)?timer(?:\s+for)?|timer\s+for|countdown\s+for)\s+(\d+(?:\.\d+)?)\s*(?:minute|minutes|min|mins)?(?:\s+(?:for|to|called)?\s+(.+))?$", lower_clean)
+		if timer_set_match:
+			mins = float(timer_set_match.group(1))
+			lbl = (timer_set_match.group(2) or "Timer").strip()
+			from tools.smart_alarms import get_alarm_manager
+			t_item = get_alarm_manager().set_timer(mins, label=lbl)
+			return f"Timer set for {mins} minute{'s' if mins != 1 else ''} for '{lbl}', sir."
+
+		if any(lower_clean == p for p in ("show timers", "active timers", "my timers", "list timers", "what are my timers")):
+			from tools.smart_alarms import get_alarm_manager
+			active_timers = get_alarm_manager().list_timers()
+			if not active_timers:
+				return "You have no active timers right now, sir."
+			t_desc = [f"#{t['id']} '{t['label']}' with {int(t['remaining_seconds'])} seconds remaining" for t in active_timers]
+			return f"You have {len(active_timers)} active timer{'s' if len(active_timers) > 1 else ''}: " + "; ".join(t_desc) + "."
+
+		if any(lower_clean == p or lower_clean.startswith("cancel timer") for p in ("cancel timer", "cancel timers", "clear timers", "stop timer")):
+			from tools.smart_alarms import get_alarm_manager
+			c = get_alarm_manager().cancel_all()
+			return f"Cancelled all active timers, sir." if c > 0 else "There were no active timers to cancel, sir."
+
+		# 4h. Git Intelligence & Contribution Automator
+		if any(lower_clean == p for p in ("git status", "what is my git status", "what's my git status", "check git", "repository status", "git summary")):
+			from tools.git_intel import get_git_status
+			status = get_git_status()
+			self._emit_message("assistant", status["display"])
+			return status["spoken"]
+
+		if any(lower_clean == p for p in ("recent commits", "show commits", "git log", "git history")):
+			from tools.git_intel import get_recent_commits
+			commits = get_recent_commits(limit=4)
+			if not commits:
+				return "No recent Git commits found, sir."
+			display_lines = ["🌿 **Recent Commits**:"]
+			spoken_lines = []
+			for c in commits:
+				display_lines.append(f"- `{c['hash']}` ({c['date']}): {c['message']}")
+				spoken_lines.append(f"{c['message']} ({c['date']})")
+			self._emit_message("assistant", "\n".join(display_lines))
+			return f"Recent commits include: " + "; ".join(spoken_lines[:3]) + ", sir."
+
+		commit_match = re.search(r"^(?:git\s+commit(?:\s+and\s+push)?|commit\s+and\s+push|commit\s+changes(?:\s+and\s+push)?)\s*(?:with\s+message)?(?:\s+['\"]?(.+?)['\"]?)?$", lower_clean)
+		if commit_match and commit_match.group(1):
+			c_msg = commit_match.group(1).strip()
+			from tools.git_intel import quick_commit_and_push
+			c_res = quick_commit_and_push(c_msg)
+			if c_res.get("display"):
+				self._emit_message("assistant", c_res["display"])
+			return c_res.get("spoken", "Committed and pushed to GitHub, sir.")
+
+		# 4i. Live Deep Web & Knowledge Research
+		research_match = re.search(r"^(?:research|look\s+up|search\s+for|tell\s+me\s+about|who\s+was|who\s+is|what\s+is|define)\s+(.+)$", lower_clean)
+		is_research_query = bool(research_match and not any(w in lower_clean for w in ("file", "download", "screen", "timer", "note", "git", "pc", "window", "tab", "app", "browser", "battery", "cpu", "ram", "memory")))
+		if is_research_query and research_match:
+			topic_target = research_match.group(1).strip(" ?.,!")
+			if len(topic_target.split()) >= 1 and len(topic_target) > 2:
+				from tools.web_researcher import research_topic
+				r_res = research_topic(topic_target)
+				if r_res.get("ok"):
+					self._emit_message("assistant", r_res["display"])
+					return r_res["spoken"]
+
+		# 4j. Windows Clipboard Intelligence
+		if any(lower_clean == p for p in ("what's on my clipboard", "what is on my clipboard", "read clipboard", "check clipboard", "clipboard content", "clipboard")):
+			from tools.clipboard_intel import inspect_clipboard
+			clip = inspect_clipboard()
+			self._emit_message("assistant", clip["display"])
+			return clip["spoken"]
+
+		copy_clip_match = re.search(r"^(?:copy\s+to\s+clipboard|copy\s+this|copy)\s+(.+)$", lower_clean)
+		if copy_clip_match and not any(w in lower_clean for w in ("file", "folder", "directory")):
+			to_copy = copy_clip_match.group(1).strip()
+			from tools.clipboard_intel import set_clipboard_text
+			if set_clipboard_text(to_copy):
+				return f"Copied to clipboard, sir."
+
+		# 4k. Developer Code Assistant & File Inspection
+		code_inspect_match = re.search(r"^(?:explain\s+code\s+(?:in\s+)?|analyze\s+code\s+(?:in\s+)?|inspect\s+code\s+(?:in\s+)?|code\s+stats\s+(?:for\s+)?)(.+)$", lower_clean)
+		if code_inspect_match:
+			fn_target = code_inspect_match.group(1).strip()
+			from tools.dev_assistant import analyze_code_file
+			c_res = analyze_code_file(fn_target)
+			if c_res.get("ok"):
+				self._emit_message("assistant", c_res["display"])
+				return c_res["spoken"]
 
 		# 5. Remote PC Operations: Power & Security
 		if any(k in lower_clean for k in ("lock pc", "lock computer", "lock screen", "lock laptop", "lock workstation")):
