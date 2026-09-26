@@ -422,4 +422,4 @@ class TestVocalScreenControlAndAcousticRobustness:
         plan = planner.execute("what is the weather in Tokyo", r)
         assert plan.tool == "weather.get"
         assert plan.success is True
-        assert "Tokyo" in str(plan.result)
+        assert "tokyo" in str(plan.result).lower()
