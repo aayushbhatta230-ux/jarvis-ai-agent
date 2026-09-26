@@ -437,6 +437,139 @@ function unlockAudio() {
   document.addEventListener(evt, unlockAudio, { passive: true });
 });
 
+/* ------------------------------------------------------------------ */
+/* STREAMING SPEECH ENGINE (SENTENCE-BY-SENTENCE PIPELINED PLAYBACK)   */
+/* Speaks sentences IMMEDIATELY as they are generated, eliminating lag */
+/* ------------------------------------------------------------------ */
+class StreamingSpeechQueue {
+  constructor() {
+    this.queue = [];
+    this.isPlaying = false;
+    this.player = getPhoneAudioPlayer();
+    this.currentText = '';
+    this.streamSpokenIndex = 0;
+    this.activeStreamText = '';
+
+    this.player.onended = () => {
+      this.playNext();
+    };
+    this.player.onerror = (e) => {
+      console.warn('[STREAMING TTS] Player error, falling back:', e);
+      if (this.currentText) {
+        fallbackSpeechSynthesis(this.currentText, () => this.playNext());
+      } else {
+        this.playNext();
+      }
+    };
+  }
+
+  resetStream() {
+    this.streamSpokenIndex = 0;
+    this.activeStreamText = '';
+    this.queue = [];
+  }
+
+  enqueue(sentence) {
+    let clean = (sentence || '').trim();
+    clean = clean.replace(/```[\s\S]*?```/g, '');
+    clean = clean.replace(/https?:\/\/\S+/g, '');
+    clean = clean.replace(/[*_#`📁🤖⚠️💻🎥\[\]]/g, '').trim();
+    if (!clean || clean.length < 2) return;
+
+    this.queue.push(clean);
+    if (!this.isPlaying) {
+      this.playNext();
+    }
+  }
+
+  processStreamChunk(fullTextSoFar) {
+    if (!app.phoneAudio) return;
+    this.activeStreamText = fullTextSoFar;
+    const remaining = fullTextSoFar.slice(this.streamSpokenIndex);
+    // Boundary: period/exclamation/question mark followed by space or newline, or double newline
+    const sentenceRegex = /([.?!]+(?:\s+|\n+)|(?:\n\n+))/;
+    const match = remaining.match(sentenceRegex);
+    if (match && match.index !== undefined) {
+      const sentenceEnd = match.index + match[0].length;
+      const sentence = remaining.slice(0, match.index + match[1].trimEnd().length).trim();
+      this.streamSpokenIndex += sentenceEnd;
+      if (sentence) {
+        this.enqueue(sentence);
+      }
+    }
+  }
+
+  finishStream(fullText) {
+    if (!app.phoneAudio) return;
+    const textToFinish = fullText || this.activeStreamText;
+    const remaining = textToFinish.slice(this.streamSpokenIndex).trim();
+    if (remaining) {
+      this.enqueue(remaining);
+      this.streamSpokenIndex = textToFinish.length;
+    }
+  }
+
+  playNext() {
+    if (this.queue.length === 0) {
+      this.isPlaying = false;
+      this.currentText = '';
+      if (app.state === 'speaking') {
+        setBodyState('listening');
+        updateStatusCaption('Listening continuously…');
+      }
+      setTimeout(resumeContinuousVoice, 150);
+      return;
+    }
+
+    this.isPlaying = true;
+    const nextSentence = this.queue.shift();
+    this.currentText = nextSentence;
+
+    setBodyState('speaking');
+    updateStatusCaption('Speaking…');
+    pauseContinuousVoice();
+
+    showCoreResponse(nextSentence);
+
+    const ttsUrl = '/api/tts?text=' + encodeURIComponent(nextSentence) + '&voice=en-GB-RyanNeural';
+    try {
+      this.player.pause();
+      this.player.src = ttsUrl;
+      this.player.currentTime = 0;
+      const playPromise = this.player.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          if (err && err.name === 'AbortError') return;
+          console.warn('[STREAMING TTS] Autoplay rejected, using Web Speech:', err);
+          fallbackSpeechSynthesis(nextSentence, () => this.playNext());
+        });
+      }
+    } catch (err) {
+      console.warn('[STREAMING TTS] Audio error:', err);
+      fallbackSpeechSynthesis(nextSentence, () => this.playNext());
+    }
+  }
+
+  stop() {
+    this.queue = [];
+    this.isPlaying = false;
+    this.currentText = '';
+    this.streamSpokenIndex = 0;
+    try {
+      this.player.pause();
+      this.player.currentTime = 0;
+    } catch (_) {}
+    if ('speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel(); } catch (_) {}
+    }
+    if (app.state === 'speaking') {
+      setBodyState('listening');
+    }
+  }
+}
+
+const streamingTTS = new StreamingSpeechQueue();
+
 function speakOnPhone(text) {
   if (!app.phoneAudio) {
     if (app.state === 'speaking' || app.state === 'processing') setBodyState('listening');
@@ -446,7 +579,6 @@ function speakOnPhone(text) {
 
   unlockAudio();
 
-  // Strip code blocks, links, and markdown formatting so speech is concise and clean
   let clean = (text || '').trim();
   clean = clean.replace(/```[\s\S]*?```/g, '');
   clean = clean.replace(/https?:\/\/\S+/g, '');
@@ -457,68 +589,17 @@ function speakOnPhone(text) {
     return;
   }
 
-  // Deduplication guard: ignore repeated speech calls within 3.5 seconds
+  // Deduplication guard
   const norm = clean.toLowerCase().replace(/[^a-z0-9]/g, '');
   const now = Date.now();
-  if (norm && norm === lastSpokenPhoneText && (now - lastSpokenPhoneTime < 3500)) {
+  if (norm && norm === lastSpokenPhoneText && (now - lastSpokenPhoneTime < 3000)) {
     return;
   }
   lastSpokenPhoneText = norm;
   lastSpokenPhoneTime = now;
 
-  setBodyState('speaking');
-  updateStatusCaption('Speaking…');
-  pauseContinuousVoice();
-
-  if ('speechSynthesis' in window) {
-    try { window.speechSynthesis.cancel(); } catch(_) {}
-  }
-
-  const player = getPhoneAudioPlayer();
-  const ttsUrl = '/api/tts?text=' + encodeURIComponent(clean);
-
-  let finished = false;
-  const onFinish = () => {
-    if (finished) return;
-    finished = true;
-    if (app.state === 'speaking') {
-      setBodyState('listening');
-      updateStatusCaption('Listening continuously…');
-    }
-    setTimeout(resumeContinuousVoice, 180);
-  };
-
-  try {
-    player.pause();
-    player.onplay = () => {
-      setBodyState('speaking');
-      updateStatusCaption('Speaking…');
-    };
-    player.onended = onFinish;
-    player.onerror = (e) => {
-      console.warn('[TTS] Audio endpoint error, falling back to local synthesis:', e);
-      fallbackSpeechSynthesis(clean, onFinish);
-    };
-
-    player.src = ttsUrl;
-    player.currentTime = 0;
-
-    const words = clean.split(/\s+/).length;
-    const approxDurationMs = Math.max(2500, words * 450);
-    setTimeout(onFinish, approxDurationMs + 4000);
-
-    const playPromise = player.play();
-    if (playPromise !== undefined) {
-      playPromise.catch((err) => {
-        if (err && err.name === 'AbortError') return;
-        console.warn('[TTS] Player autoplay blocked, falling back:', err);
-        fallbackSpeechSynthesis(clean, onFinish);
-      });
-    }
-  } catch(err) {
-    console.warn('[TTS] Audio error:', err);
-    fallbackSpeechSynthesis(clean, onFinish);
-  }
+  streamingTTS.resetStream();
+  streamingTTS.enqueue(clean);
 }
 
 function fallbackSpeechSynthesis(clean, onFinishCallback) {
@@ -598,8 +679,15 @@ function handleBackendMessage(event) {
   const text = (event.text || '').trim();
   if (event.stream && event.status === 'streaming') {
     if (!app.activeMsgId || !app.activeMsgId.isConnected) {
+      streamingTTS.resetStream();
       app.activeMsgId = addMessage('assistant', text, { streaming: true });
-    } else { const p = app.activeMsgId.querySelector('p'); if (p) p.textContent = text; if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight; }
+    } else {
+      const p = app.activeMsgId.querySelector('p');
+      if (p) p.textContent = text;
+      if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    // Stream sentence-by-sentence speech immediately while typing!
+    streamingTTS.processStreamChunk(text);
     return;
   }
   if (app.activeMsgId && app.activeMsgId.isConnected && role === 'assistant') {
@@ -608,9 +696,13 @@ function handleBackendMessage(event) {
     const finalText = text || (p ? p.textContent : '');
     if (p) p.textContent = finalText;
     app.activeMsgId = null;
-    if (messagesEl && historyMessages) { const l = messagesEl.lastElementChild; if (l) historyMessages.appendChild(l.cloneNode(true)); }
+    if (messagesEl && historyMessages) {
+      const l = messagesEl.lastElementChild;
+      if (l) historyMessages.appendChild(l.cloneNode(true));
+    }
     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
-    if (finalText) speakOnPhone(finalText);
+    // Finish any remaining tail sentence in the audio stream
+    streamingTTS.finishStream(finalText);
     return;
   }
   addMessage(role, text);
@@ -761,18 +853,16 @@ async function sendCommand(text, source = 'text') {
 
   try {
     const res = await postJSON('/api/command', { text: clean, source, wait: true });
-    if (res && res.response) {
+    // SSE (/events) handles real-time message rendering and streaming TTS.
+    // If SSE is offline or disconnected, fall back to postJSON response:
+    if (!app.connected && res && res.response) {
       const respText = res.response.trim();
-      const lastAsstMsg = messagesEl ? messagesEl.querySelector('.message.jarvis:last-child') : null;
-      const lastAsstText = lastAsstMsg ? lastAsstMsg.textContent : '';
-      if (!lastAsstText.includes(respText)) {
-        addMessage('assistant', respText);
-      }
+      addMessage('assistant', respText);
       showCoreResponse(respText);
       speakOnPhone(respText);
-      setBodyState('listening');
-      updateStatusCaption('Listening continuously…');
     }
+    setBodyState('listening');
+    updateStatusCaption('Listening continuously…');
   } catch(e) {
     console.warn('Command dispatch error:', e);
     toast('JARVIS not responding.', true);
@@ -2649,7 +2739,9 @@ async function executeMirrorVoiceCommand(rawCmd) {
     const res = await postJSON('/api/command', { text: clean, source: 'remote_voice', wait: true });
     const reply = (res && res.response) ? res.response : 'Command sent, sir.';
     showMirrorFeedback('JARVIS: ' + reply);
-    speakOnPhone(reply);
+    if (!app.connected) {
+      speakOnPhone(reply);
+    }
   } catch(e) {
     showMirrorFeedback('JARVIS error: ' + (e.message || 'not responding'));
   }
