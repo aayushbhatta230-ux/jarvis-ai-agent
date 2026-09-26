@@ -41,17 +41,22 @@ class ScreenPerceiver:
         self.last_window_title: str = ""
 
     def grab_image(self) -> Image.Image | None:
-        if not HAS_MSS:
-            return None
         try:
-            sct_cls = getattr(mss, "MSS", getattr(mss, "mss", None))
-            with sct_cls() as sct:
-                monitor = sct.monitors[1]
-                sct_img = sct.grab(monitor)
-                return Image.frombytes("RGB", sct_img.size, sct_img.rgb)
-        except Exception as exc:
-            print(f"[SCREEN] Capture error: {exc}")
-            return None
+            from tools.screen import _grab_image
+            return _grab_image()
+        except Exception as exc1:
+            pass
+
+        if HAS_MSS:
+            try:
+                sct_cls = getattr(mss, "MSS", getattr(mss, "mss", None))
+                with sct_cls() as sct:
+                    monitor = sct.monitors[1]
+                    sct_img = sct.grab(monitor)
+                    return Image.frombytes("RGB", sct_img.size, sct_img.rgb)
+            except Exception as exc2:
+                print(f"[SCREEN] Capture error: {exc2}")
+        return None
 
 
     def perceive(self, strategy: str = PerceptionStrategy.USER_SPEAKS) -> str:

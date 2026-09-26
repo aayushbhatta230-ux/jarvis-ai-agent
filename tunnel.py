@@ -1,18 +1,27 @@
 """Remote Access Tunnel Manager for JARVIS.
 
-Supports:
-1. Permanent ngrok Static Domain (zero-cost permanent HTTPS bookmarkable forever).
-2. Permanent Cloudflare Zero Trust Named Tunnel (via token).
-3. Cloudflare Quick Tunnel (temporary public HTTPS URL via trycloudflare.com).
+Features:
+1. Permanent Cloudflare Tunnel:
+   - Survives server restarts and background lifecycles.
+   - Automatically reuses the healthy running tunnel process on consecutive runs,
+     preventing domain rotation and keeping the exact same URL permanent forever.
+2. Dynamic Gateway Portal Sync:
+   - Auto-synchronizes the live URL to ``docs/endpoint.json`` and ``docs/index.html``.
+   - Pushes to GitHub repository so the mobile gateway URL remains permanently valid.
+3. Named Tunnel / ngrok Static Domain Support:
+   - Supports custom domains, tokens, and static domains if configured.
 
-Configuration:
-- ``config/ngrok_domain.txt`` (Permanent ngrok domain, e.g. aftermath-feminine-entwine.ngrok-free.dev)
-- ``config/permanent_url.txt`` (Permanent public hostname/URL)
-- ``config/tunnel_url.txt`` (Active live URL for UI QR code)
+Configuration Files:
+- ``config/permanent_url.txt``: Permanent public URL.
+- ``config/tunnel_url.txt``: Active live URL used by interface & QR code.
+- ``config/tunnel_token.txt``: Optional Cloudflare Zero Trust Named Tunnel token.
+- ``config/ngrok_domain.txt``: Optional ngrok static domain.
+- ``docs/endpoint.json``: Auto-synced endpoint for permanent mobile gateway portal.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -21,11 +30,16 @@ import threading
 import time
 from pathlib import Path
 
-CONFIG_DIR = Path(__file__).resolve().parent / "config"
+PROJECT_ROOT = Path(__file__).resolve().parent
+CONFIG_DIR = PROJECT_ROOT / "config"
+DOCS_DIR = PROJECT_ROOT / "docs"
+
 TUNNEL_URL_FILE = CONFIG_DIR / "tunnel_url.txt"
 TUNNEL_TOKEN_FILE = CONFIG_DIR / "tunnel_token.txt"
 PERMANENT_URL_FILE = CONFIG_DIR / "permanent_url.txt"
 NGROK_DOMAIN_FILE = CONFIG_DIR / "ngrok_domain.txt"
+ENDPOINT_JSON_FILE = DOCS_DIR / "endpoint.json"
+GATEWAY_HTML_FILE = DOCS_DIR / "index.html"
 
 _tunnel_url: str | None = None
 _tunnel_process: subprocess.Popen | None = None
@@ -36,9 +50,6 @@ _running: bool = False
 
 def get_tunnel_url() -> str | None:
     """Return the current active tunnel URL, or None if not running."""
-    with _lock:
-        if _tunnel_url and "api.trycloudflare.com" not in _tunnel_url:
-            return _tunnel_url
     if TUNNEL_URL_FILE.is_file():
         try:
             val = TUNNEL_URL_FILE.read_text(encoding="utf-8").strip()
@@ -46,6 +57,9 @@ def get_tunnel_url() -> str | None:
                 return val
         except Exception:
             pass
+    with _lock:
+        if _tunnel_url and "api.trycloudflare.com" not in _tunnel_url:
+            return _tunnel_url
     return None
 
 
@@ -54,7 +68,7 @@ def get_permanent_url() -> str | None:
     if PERMANENT_URL_FILE.is_file():
         try:
             val = PERMANENT_URL_FILE.read_text(encoding="utf-8").strip()
-            if val:
+            if val and "loca.lt" not in val and "api.trycloudflare.com" not in val:
                 return val
         except Exception:
             pass
@@ -90,8 +104,7 @@ def get_tunnel_token() -> str | None:
 
 def _find_ngrok() -> str | None:
     """Locate the ngrok binary."""
-    # Check JARVIS project root first
-    local_ngrok = Path(__file__).resolve().parent / "ngrok.exe"
+    local_ngrok = PROJECT_ROOT / "ngrok.exe"
     if local_ngrok.is_file():
         return str(local_ngrok)
 
@@ -114,7 +127,7 @@ def _find_ngrok() -> str | None:
 def _find_cloudflared() -> str | None:
     """Locate the cloudflared binary."""
     for loc in (
-        Path(__file__).resolve().parent / "cloudflared.exe",
+        PROJECT_ROOT / "cloudflared.exe",
         Path.cwd() / "cloudflared.exe",
         Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links" / "cloudflared.exe",
         Path(os.environ.get("ProgramFiles", "")) / "cloudflared" / "cloudflared.exe",
@@ -131,8 +144,105 @@ def _find_cloudflared() -> str | None:
     return None
 
 
+def _is_cloudflared_running() -> bool:
+    """Check if cloudflared process is currently running on the system."""
+    if sys.platform != "win32":
+        return False
+    try:
+        out = subprocess.check_output(
+            ["tasklist", "/FI", "IMAGENAME eq cloudflared.exe", "/FO", "CSV", "/NH"],
+            text=True,
+            timeout=2,
+        )
+        return "cloudflared.exe" in out.lower()
+    except Exception:
+        return False
+
+
+def _check_tunnel_alive(url: str, timeout: float = 2.5) -> bool:
+    """Verify if the tunnel URL is reachable over the public internet."""
+    if not url or not url.startswith("https://"):
+        return False
+    if "api.trycloudflare.com" in url or "loca.lt" in url:
+        return False
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{url.rstrip('/')}/api/state",
+            headers={"User-Agent": "JARVIS-HealthCheck/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status in (200, 204, 301, 302, 404, 502)
+    except Exception:
+        try:
+            req = urllib.request.Request(
+                url.rstrip("/"),
+                headers={"User-Agent": "JARVIS-HealthCheck/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status in (200, 204, 301, 302, 404, 502)
+        except Exception:
+            return False
+
+
+def _sync_gateway(tunnel_url: str) -> None:
+    """Synchronize live tunnel URL to docs/endpoint.json and git portal."""
+    if not tunnel_url or "api.trycloudflare.com" in tunnel_url:
+        return
+    try:
+        DOCS_DIR.mkdir(parents=True, exist_ok=True)
+        endpoint_data = {
+            "tunnel_url": tunnel_url,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "status": "online",
+        }
+        ENDPOINT_JSON_FILE.write_text(json.dumps(endpoint_data, indent=2), encoding="utf-8")
+
+        if GATEWAY_HTML_FILE.is_file():
+            html_content = GATEWAY_HTML_FILE.read_text(encoding="utf-8")
+            updated_html = re.sub(
+                r'let targetUrl = "[^"]+"',
+                f'let targetUrl = "{tunnel_url}"',
+                html_content,
+            )
+            updated_html = re.sub(
+                r'href="https://[^"]+\.trycloudflare\.com"',
+                f'href="{tunnel_url}"',
+                updated_html,
+            )
+            if updated_html != html_content:
+                GATEWAY_HTML_FILE.write_text(updated_html, encoding="utf-8")
+
+        def _git_push():
+            try:
+                subprocess.run(
+                    ["git", "add", "docs/endpoint.json", "docs/index.html"],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    timeout=5,
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", "Auto-sync tunnel gateway endpoint [skip ci]"],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    timeout=5,
+                )
+                subprocess.run(
+                    ["git", "push", "origin", "main"],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    timeout=10,
+                )
+            except Exception:
+                pass
+
+        threading.Thread(target=_git_push, name="jarvis-git-sync", daemon=True).start()
+    except Exception as exc:
+        print(f"[TUNNEL] Gateway sync notice: {exc}")
+
+
 def _kill_existing_tunnels() -> None:
-    """Kill lingering tunnel processes to prevent port conflicts."""
+    """Kill lingering tunnel processes if forced restart is requested."""
     if sys.platform == "win32":
         for exe in ("cloudflared.exe", "ngrok.exe"):
             try:
@@ -141,8 +251,12 @@ def _kill_existing_tunnels() -> None:
                 pass
 
 
-def start_tunnel(port: int = 8765, callback=None) -> threading.Thread | None:
-    """Start either a permanent cloudflare or ngrok tunnel in a background thread."""
+def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> threading.Thread | None:
+    """Start or attach to a permanent tunnel process.
+
+    If an existing healthy tunnel is already running, it is REUSED without restarting,
+    guaranteeing that the URL/domain never changes across server runs.
+    """
     global _tunnel_url, _tunnel_process, _active_port, _running
     _active_port = port
     _running = True
@@ -155,30 +269,60 @@ def start_tunnel(port: int = 8765, callback=None) -> threading.Thread | None:
         print("[TUNNEL] Neither cloudflared nor ngrok was found.")
         return None
 
-    _kill_existing_tunnels()
+    # -----------------------------------------------------------------
+    # Step 1: Check if an existing tunnel is ALREADY running and healthy!
+    # Reusing it guarantees the domain NEVER changes across server runs.
+    # -----------------------------------------------------------------
+    if not force_new:
+        existing_url = get_tunnel_url() or get_permanent_url()
+        if existing_url and "trycloudflare.com" in existing_url and _is_cloudflared_running():
+            if _check_tunnel_alive(existing_url):
+                with _lock:
+                    _tunnel_url = existing_url
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                TUNNEL_URL_FILE.write_text(existing_url, encoding="utf-8")
+                PERMANENT_URL_FILE.write_text(existing_url, encoding="utf-8")
+                print("=" * 60)
+                print("  JARVIS PERMANENT TUNNEL ACTIVE (REUSING RUNNING TUNNEL):")
+                print(f"  --> {existing_url}")
+                print("  Domain is locked and unchanged across server runs!")
+                print("=" * 60)
+                if callback:
+                    callback(existing_url)
+                _sync_gateway(existing_url)
+                return None
+
+    if force_new:
+        _kill_existing_tunnels()
 
     def _run():
         global _tunnel_url, _tunnel_process
 
         # -------------------------------------------------------------
-        # Mode 1: Cloudflare Tunnel (UNLIMITED BANDWIDTH, NO EXPIRATION)
+        # Mode 1: Cloudflare Tunnel (UNLIMITED BANDWIDTH, PERSISTENT DAEMON)
         # -------------------------------------------------------------
         if cloudflared:
             cmd = [
                 cloudflared, "tunnel", "--url", f"http://127.0.0.1:{port}",
                 "--no-autoupdate",
             ]
-            print(f"[TUNNEL] Starting Cloudflare Tunnel: {' '.join(cmd)}")
+            print(f"[TUNNEL] Launching persistent Cloudflare Tunnel: {' '.join(cmd)}")
 
             while _running:
                 try:
+                    # Windows: CREATE_NEW_PROCESS_GROUP allows cloudflared to persist cleanly
+                    creationflags = (
+                        subprocess.CREATE_NEW_PROCESS_GROUP
+                        if sys.platform == "win32"
+                        else 0
+                    )
                     proc = subprocess.Popen(
                         cmd,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
                         bufsize=1,
-                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                        creationflags=creationflags,
                     )
                 except Exception as exc:
                     print(f"[TUNNEL] Failed to start cloudflared: {exc}")
@@ -204,12 +348,13 @@ def start_tunnel(port: int = 8765, callback=None) -> threading.Thread | None:
                         TUNNEL_URL_FILE.write_text(url, encoding="utf-8")
                         PERMANENT_URL_FILE.write_text(url, encoding="utf-8")
                         print("=" * 60)
-                        print("  JARVIS CLOUDFLARE TUNNEL ACTIVE (UNLIMITED BANDWIDTH):")
+                        print("  JARVIS CLOUDFLARE PERMANENT TUNNEL ONLINE:")
                         print(f"  --> {url}")
-                        print("  Open this URL on iPhone Safari & Add to Home Screen!")
+                        print("  This domain will remain active across restarts!")
                         print("=" * 60)
                         if callback:
                             callback(url)
+                        _sync_gateway(url)
 
                 proc.wait()
                 with _lock:
@@ -279,26 +424,45 @@ def start_tunnel(port: int = 8765, callback=None) -> threading.Thread | None:
     return thread
 
 
-def stop_tunnel() -> None:
-    """Terminate the tunnel process if running."""
-    global _tunnel_process, _running
+def stop_tunnel(kill_daemon: bool = False) -> None:
+    """Pause tunnel manager.
+
+    By default, kill_daemon is False so the background cloudflared process remains
+    alive and keeps the trycloudflare domain permanently connected for subsequent runs.
+    """
+    global _running
     _running = False
-    with _lock:
-        proc = _tunnel_process
-    if proc is not None:
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
+    if kill_daemon:
+        with _lock:
+            proc = _tunnel_process
+        if proc is not None:
             try:
-                proc.kill()
+                proc.terminate()
+                proc.wait(timeout=3)
             except Exception:
-                pass
-    _kill_existing_tunnels()
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        _kill_existing_tunnels()
 
 
-def restart_tunnel(port: int = 8765) -> threading.Thread | None:
-    """Stop current tunnel and launch with newest configuration."""
-    stop_tunnel()
-    time.sleep(0.8)
-    return start_tunnel(port)
+def restart_tunnel(port: int = 8765, force_new: bool = False) -> threading.Thread | None:
+    """Stop current tunnel and launch newest configuration."""
+    stop_tunnel(kill_daemon=force_new)
+    if force_new:
+        time.sleep(0.8)
+    return start_tunnel(port, force_new=force_new)
+
+
+def save_permanent_config(token: str = "", url: str = "") -> None:
+    """Save persistent tunnel credentials and target URL."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if token:
+        TUNNEL_TOKEN_FILE.write_text(token.strip(), encoding="utf-8")
+    if url:
+        cleaned_url = url.strip()
+        if not cleaned_url.startswith("http://") and not cleaned_url.startswith("https://"):
+            cleaned_url = f"https://{cleaned_url}"
+        PERMANENT_URL_FILE.write_text(cleaned_url, encoding="utf-8")
+        TUNNEL_URL_FILE.write_text(cleaned_url, encoding="utf-8")

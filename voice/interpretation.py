@@ -119,13 +119,25 @@ class TranscriptInterpreter:
 		r"(?:jarvis|javis|jarvik|service|jervis|roses?|travis|harvest|drivers?|surface|chavez|charvis|starbucks|office|artists?|ravish|rabish|davis|clovis|jayveer|trevor|tarvis)[,\s:\-]+",
 		re.IGNORECASE,
 	)
+	_WAKE_SUFFIX_PATTERN = re.compile(
+		r"[, ]+\b(?:hey\s+)?(?:jarvis|javis|jarvik|service|jervis|travis|harvest|surface|starbucks)[.?!]?$",
+		re.IGNORECASE,
+	)
+	_TRAIL_FILLER_PATTERN = re.compile(
+		r"[, ]+\b(?:please|for me|thank you|thanks|will you|can you|could you)\b[.?!]?$",
+		re.IGNORECASE,
+	)
 
 	def _strip_filler(self, text: str) -> str:
 		cleaned = self._WAKE_PREFIX_PATTERN.sub("", text)
 		cleaned = self._LEAD_FILLER_PATTERN.sub("", cleaned)
+		cleaned = self._WAKE_SUFFIX_PATTERN.sub("", cleaned)
+		cleaned = self._TRAIL_FILLER_PATTERN.sub("", cleaned)
 		cleaned = self._FILLER_PATTERN.sub(" ", cleaned)
 		cleaned = self._WAKE_PREFIX_PATTERN.sub("", cleaned)
+		cleaned = self._WAKE_SUFFIX_PATTERN.sub("", cleaned)
 		cleaned = self._LEAD_FILLER_PATTERN.sub("", cleaned)
+		cleaned = self._TRAIL_FILLER_PATTERN.sub("", cleaned)
 		return re.sub(r"\s+", " ", cleaned).strip(" ,.")
 
 	def normalize_speech_input(self, text: str) -> str:
@@ -134,10 +146,15 @@ class TranscriptInterpreter:
 			return ""
 		cleaned = self._strip_filler(text)
 		# Common acoustic STT phonetic misrecognitions
-		cleaned = re.sub(r"\b(?:on\s+)?ice\s+cream\b", "on my screen", cleaned, flags=re.IGNORECASE)
+		cleaned = re.sub(r"\b(?:on\s+)?ice\s*cream\b", "on my screen", cleaned, flags=re.IGNORECASE)
+		cleaned = re.sub(r"\bwhat do you see on my (?:piec?e|peace)(?:\s+of)?(?:\s+pc)?\b", "what do you see on my PC", cleaned, flags=re.IGNORECASE)
+		cleaned = re.sub(r"\b(?:on\s+my|on)\s+(?:piec?e|peace)(?:\s+of)?(?:\s+pc)?\b", "on my PC", cleaned, flags=re.IGNORECASE)
 		cleaned = re.sub(r"\b(?:al\s+jarvis|tell\s+service|tell\s+travis|hey\s+service)\b", "jarvis", cleaned, flags=re.IGNORECASE)
-		cleaned = re.sub(r"\bantigravity\s+id\b", "antigravity ide", cleaned, flags=re.IGNORECASE)
-		cleaned = re.sub(r"\b(?:well\s+then\s+)?(?:am\s+i|my)\s+audible(?:\s+to\s+you)?\b", "can you hear me", cleaned, flags=re.IGNORECASE)
+		cleaned = re.sub(r"\banti[- ]?gravity\s+id\b", "antigravity ide", cleaned, flags=re.IGNORECASE)
+		cleaned = re.sub(r"\b(?:well\s+then\s+)?(?:are\s+you|am\s+i|you\s+are|my)?\s*audible(?:\s+to\s+you)?\b", "can you hear me", cleaned, flags=re.IGNORECASE)
+		cleaned = re.sub(r"\bclick\s+on\s+(?:fell|fail|foul)\b", "click on file", cleaned, flags=re.IGNORECASE)
+		cleaned = re.sub(r"\bstart\s+a\s+new\s+(?:combo|combat)\b", "start a new convo", cleaned, flags=re.IGNORECASE)
+		cleaned = re.sub(r"\bstart\s+a\s+new\s+conversation\b", "start a new convo", cleaned, flags=re.IGNORECASE)
 		return cleaned.strip()
 
 	def _normalize(self, text: str) -> str:

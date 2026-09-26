@@ -894,6 +894,10 @@ class IntentEngine:
         if self._is_question(text):
             return False
 
+        # Exclude app/screen/conversation/system commands from being captured as songs
+        if any(w in text for w in ("convo", "conversation", "chat", "recording", "screen", "window", "timer", "stopwatch", "browser", "chrome", "tab", "file", "edit", "antigravity")):
+            return False
+
         # "watch" belongs to entertainment/video handling.
         if re.search(r"\bwatch\b", text):
             return False
@@ -2453,6 +2457,32 @@ class IntentEngine:
         )
 
     def _detect_control_action(self, lower: str):
+
+        # --------------------------------------------------------------
+        # Natural conversation / app actions
+        # --------------------------------------------------------------
+        if re.search(r"\b(?:start|open|create|begin)?\s*(?:a\s+)?new\s+(?:convo|conversation|chat)\b", lower):
+            return ("click", "start a new convo")
+
+        # Open/click top menus: File, Edit, View, Run, Terminal, Help
+        menu_m = re.search(r"\b(?:open|click\s+(?:on\s+)?|tap\s+(?:on\s+)?|show)\s+(?:the\s+)?(file|edit|selection|view|go|run|terminal|help)\s+menu\b", lower)
+        if menu_m:
+            return ("click", f"{menu_m.group(1)} menu")
+
+        if lower in ("files", "file", "file menu", "the file menu"):
+            return ("click", "file menu")
+        if lower in ("edit", "edit menu", "the edit menu"):
+            return ("click", "edit menu")
+        if lower in ("new convo", "start new convo", "start a new convo", "new conversation", "new chat"):
+            return ("click", "start a new convo")
+
+        # Direct natural click/tap: "click on File", "click on Edit", "click on test_dom.js", "tap on YouTube", "press on button"
+        click_m = re.search(r"^(?:jarvis[, ]+)?(?:please )?(?:click\s+(?:on\s+)?|tap\s+(?:on\s+)?|press\s+on\s+)(?:the\s+|a\s+|an\s+|my\s+)?(.+?)\s*$", lower)
+        if click_m:
+            raw_tgt = click_m.group(1).strip(" .,?!")
+            raw_tgt = re.sub(r"[, ]+\b(?:jarvis|please|for me|thank you|thanks)\b[.?!]?$", "", raw_tgt, flags=re.I).strip(" .,?!")
+            if raw_tgt and raw_tgt not in ("it", "that", "this", "screen", "button", "here"):
+                return ("click", raw_tgt)
 
         # --------------------------------------------------------------
         # Browser tab / window management

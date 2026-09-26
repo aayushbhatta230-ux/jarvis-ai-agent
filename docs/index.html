@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#030408">
   <title>JARVIS &mdash; Connecting to Neural Core</title>
-  <meta http-equiv="refresh" content="0; url=https://intelligent-heart-lodge-heights.trycloudflare.com">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -73,7 +72,7 @@
 <body>
   <div class="core-ring"></div>
   <h1>JARVIS Gateway</h1>
-  <p>Connecting to your personal PC neural core…</p>
+  <p id="statusMsg">Connecting to your personal PC neural core…</p>
   <a class="btn-connect" id="directLink" href="https://intelligent-heart-lodge-heights.trycloudflare.com">
     <span>&#9889;</span> Open JARVIS Directly
   </a>
@@ -82,12 +81,40 @@
   </div>
 
   <script>
-    const targetUrl = "https://intelligent-heart-lodge-heights.trycloudflare.com";
-    try {
-      window.location.replace(targetUrl);
-    } catch(_) {
-      window.location.href = targetUrl;
+    let targetUrl = "https://intelligent-heart-lodge-heights.trycloudflare.com";
+
+    function doRedirect(url) {
+      if (!url) return;
+      try {
+        window.location.replace(url);
+      } catch (_) {
+        window.location.href = url;
+      }
     }
+
+    // Attempt to dynamically fetch freshest endpoint from GitHub Raw
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      doRedirect(targetUrl);
+    }, 1200);
+
+    fetch("https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/docs/endpoint.json?t=" + Date.now(), {
+      signal: controller.signal
+    })
+    .then(r => r.json())
+    .then(data => {
+      clearTimeout(timeoutId);
+      if (data && data.tunnel_url) {
+        targetUrl = data.tunnel_url;
+        const btn = document.getElementById("directLink");
+        if (btn) btn.href = targetUrl;
+      }
+      doRedirect(targetUrl);
+    })
+    .catch(() => {
+      doRedirect(targetUrl);
+    });
   </script>
 </body>
 </html>

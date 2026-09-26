@@ -72,6 +72,22 @@ def execute_remote_action(action: str, **kwargs: Any) -> dict[str, Any]:
             x = int(x * sw)
             y = int(y * sh)
 
+        target_label = kwargs.get("label") or kwargs.get("target")
+        if target_label and x is None and y is None:
+            try:
+                from perception.tabs import find_and_click_target
+                res = find_and_click_target(str(target_label))
+                if res.get("ok"):
+                    return {
+                        "ok": True,
+                        "action": act,
+                        "spoken": res.get("message", f"Clicked {target_label}, sir."),
+                        "message": res.get("message", f"Clicked {target_label}"),
+                    }
+                return {"ok": False, "action": act, "error": res.get("error", f"Could not find {target_label}")}
+            except Exception as exc:
+                return {"ok": False, "action": act, "error": str(exc)}
+
         if x is not None and y is not None:
             pyautogui.click(x=int(x), y=int(y), button=button, clicks=clicks)
             coord_str = f" at ({int(x)}, {int(y)})"
@@ -81,6 +97,24 @@ def execute_remote_action(action: str, **kwargs: Any) -> dict[str, Any]:
 
         spoken = f"Clicked{coord_str}, sir."
         return {"ok": True, "action": act, "spoken": spoken, "message": f"Mouse {button}-click{coord_str}"}
+
+    if act in ("tab_click", "click_tab", "click_menu", "click_element", "switch", "switch_app", "focus"):
+        target_label = kwargs.get("target") or kwargs.get("label") or kwargs.get("text") or ""
+        if not target_label:
+            return {"ok": False, "error": "Missing target text for action"}
+        try:
+            from perception.tabs import find_and_click_target
+            res = find_and_click_target(str(target_label))
+            if res.get("ok"):
+                return {
+                    "ok": True,
+                    "action": act,
+                    "spoken": res.get("message", f"Done, sir."),
+                    "message": res.get("message", f"Done."),
+                }
+            return {"ok": False, "action": act, "error": res.get("error", f"Could not find {target_label}")}
+        except Exception as exc:
+            return {"ok": False, "action": act, "error": str(exc)}
 
     if act in ("move", "mouse_move"):
         if not pyautogui:
@@ -152,29 +186,37 @@ def execute_remote_action(action: str, **kwargs: Any) -> dict[str, Any]:
         except Exception:
             raw_val = 3
 
-        # Critical: Position mouse over target content so Windows routes MOUSEEVENTF_WHEEL to the active window!
+        # Position mouse over target content so Windows routes MOUSEEVENTF_WHEEL to the active window!
+        sw, sh = get_screen_size()
+        target_x = kwargs.get("x")
+        target_y = kwargs.get("y")
         try:
-            cur_x, cur_y = pyautogui.position()
-            target_x = kwargs.get("x")
-            target_y = kwargs.get("y")
             if target_x is not None and target_y is not None:
                 if kwargs.get("normalized", False) or (isinstance(target_x, float) and 0.0 <= target_x <= 1.0):
-                    sw, sh = get_screen_size()
                     target_x = int(target_x * sw)
                     target_y = int(target_y * sh)
-                pyautogui.moveTo(int(target_x), int(target_y))
-            elif cur_x <= 15 or cur_y <= 15:
-                # If mouse is docked at 0, 0, move it to the center of the desktop
-                sw, sh = get_screen_size()
-                pyautogui.moveTo(sw // 2, sh // 2)
+                else:
+                    target_x = int(target_x)
+                    target_y = int(target_y)
+            else:
+                cur_x, cur_y = pyautogui.position()
+                if cur_x <= 15 or cur_y <= 15:
+                    target_x = sw // 2
+                    target_y = sh // 2
+                else:
+                    target_x = cur_x
+                    target_y = cur_y
         except Exception as pos_err:
-            print(f"[SCROLL] Mouse pos error: {pos_err}")
+            target_x = sw // 2
+            target_y = sh // 2
 
         # On Windows, 1 mouse wheel notch = 120 delta units.
-        # Scale small click counts (e.g. 1-20) up to proper Windows wheel delta!
         wheel_delta = raw_val if abs(raw_val) >= 60 else (raw_val * 120)
         clicks = -abs(wheel_delta) if direction == "down" else abs(wheel_delta)
-        pyautogui.scroll(clicks)
+        try:
+            pyautogui.scroll(clicks, x=target_x, y=target_y)
+        except Exception:
+            pyautogui.scroll(clicks)
         return {"ok": True, "action": act, "spoken": f"Scrolled {direction}, sir.", "message": f"Scrolled {direction} ({abs(raw_val)} lines)"}
 
     # ---------------------------------------------------------

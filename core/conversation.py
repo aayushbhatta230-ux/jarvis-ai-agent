@@ -458,7 +458,7 @@ class ConversationManager:
 			self.set_remote_active(True)
 
 		# Normalize acoustic wake-word and conversational preambles for voice and remote voice input
-		is_voice = source in ("voice", "remote_voice")
+		is_voice = source in ("voice", "remote_voice", "remote")
 		clean_text = self.interpreter.normalize_speech_input(text) if (is_voice or text.lower().startswith(("jarvis", "hey jarvis"))) else text
 		effective_text = clean_text if clean_text else text
 
@@ -581,12 +581,20 @@ class ConversationManager:
 		return any(marker in lower for marker in ("explain in detail", "in detail", "detailed explanation", "step by step", "break down", "full explanation"))
 
 	def _stream_options(self) -> dict:
+		"""Token budget for streamed LLM responses."""
 		verbosity = self.settings.get("response_verbosity")
+		# Screen-dependent queries need more tokens for useful descriptions
+		is_screen = self._needs_screen_context(
+			getattr(self, '_current_intent', None),
+			getattr(self, '_current_raw_transcript', ''),
+		)
+		if is_screen:
+			return {"num_predict": 200}
 		if verbosity == "concise":
-			return {"num_predict": 60}
+			return {"num_predict": 80}
 		if verbosity == "detailed":
-			return {"num_predict": 220}
-		return {"num_predict": 90}
+			return {"num_predict": 250}
+		return {"num_predict": 120}
 
 	def _push_speech(self, full_text: str) -> None:
 		"""Enqueue newly-completed speakable sentences so TTS starts and
@@ -665,7 +673,17 @@ class ConversationManager:
 			"what do you see", "read my screen", "look at my screen",
 			"what's open", "what is open", "what window is open",
 			"where is the button", "find the button", "find the text",
-			"click the", "click on the", "press the",
+			"click the", "click on the", "click on ", "press the",
+			"tap on", "tap the",
+			"what app", "which app", "what tab", "which tab",
+			"what's happening", "what is happening",
+			"what browser", "which browser",
+			"open the menu", "file menu", "edit menu", "view menu",
+			"start a new", "new conversation", "new chat",
+			"close the tab", "switch tab",
+			"what's on the", "what is on the",
+			"describe the screen", "describe what",
+			"read the screen", "read what's",
 		)
 		if any(marker in lower for marker in visual_markers):
 			return True
@@ -837,42 +855,60 @@ class ConversationManager:
 	def _quick_response(self, transcript: str) -> str | None:
 		"""Answer latency-sensitive social and profile checks without an LLM trip."""
 		from datetime import datetime
+		import random
 		lower = transcript.lower().strip()
 		normalized = lower.rstrip(" .!?")
 
 		if lower.startswith(("type ", "write ", "search ", "run ", "press ", "open ", "record ", "click ", "locate ", "play ")):
 			return None
 
+		# Don't quick-respond to anything that needs screen context
+		if any(k in lower for k in ("screen", "what do you see", "look at", "click on", "what's open", "what tab", "what app")):
+			return None
+
 		# Greetings
 		if normalized in ("hello jarvis", "hi jarvis", "hey jarvis", "hello", "hi", "hey"):
-			return "At your service, sir. How may I assist you?"
-		if any(phrase in normalized for phrase in ("can you hear me", "are you there", "are you listening", "wake up")):
-			return "I am right here and fully online, sir."
+			return random.choice([
+				"At your service. What can I do for you?",
+				"Hello! What do you need?",
+				"Right here. Go ahead.",
+				"Hey! What's on your mind?",
+			])
+		if normalized == "can you hear me":
+			return "I'm here."
+		if any(phrase in normalized for phrase in ("can you hear me", "are you there", "are you listening", "wake up", "audible", "am i audible", "are you audible")):
+			return "Yes, I can hear you clearly. What can I do for you?"
 		if any(phrase in normalized for phrase in ("good morning", "good evening", "good afternoon")):
-			return "Good day to you, sir. Ready when you are."
+			hour = datetime.now().hour
+			greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
+			return f"{greeting}! Ready when you are."
 
 		# Status & Health
 		if any(phrase in normalized for phrase in ("how are you", "how are you doing", "how's it going", "system status", "status check")):
-			return "All systems are operating at peak efficiency, sir."
+			return random.choice([
+				"All systems nominal. What do you need?",
+				"Running smoothly. How can I help?",
+				"Everything's operational. Go ahead.",
+			])
 		if normalized in ("ping", "test", "jarvis"):
-			return "Online and standing by, sir."
+			return "Online. What do you need?"
 
 		# Time and Date
 		if any(phrase in normalized for phrase in ("what time is it", "what's the time", "current time", "tell me the time")):
 			now_str = datetime.now().strftime("%I:%M %p").lstrip("0")
-			return f"It is currently {now_str}, sir."
+			return f"It's {now_str}."
 		if any(phrase in normalized for phrase in ("what is the date", "what's the date", "today's date", "what day is it")):
 			today_str = datetime.now().strftime("%A, %B %d")
-			return f"Today is {today_str}, sir."
+			return f"Today is {today_str}."
 
 		# Identity & Gratitude
 		if any(phrase in normalized for phrase in ("who are you", "what are you", "what is your name")):
-			return "I am JARVIS, your personal artificial intelligence assistant."
+			return "I'm JARVIS, your personal AI assistant."
 		if any(phrase in normalized for phrase in ("thank you", "thanks", "thank you jarvis", "thanks jarvis")):
-			return "Always a pleasure, sir."
+			return "Anytime."
 		if normalized in {"what is my name", "what's my name", "do you know my name"}:
 			name = self.preference_store.snapshot().get("user_facts", {}).get("name", "Aayush")
-			return f"You are {name}, sir."
+			return f"You're {name}."
 		return None
 
 	def _needs_openjarvis(self, text: str) -> bool:
@@ -1400,13 +1436,41 @@ class ConversationManager:
 			return "I had an issue locating your laptop, sir."
 
 		# 11. Screen Controlling (Mouse & Keyboard direct commands)
-		if lower_clean.startswith(("click", "left click", "right click", "double click")):
-			from tools.remote_control import execute_remote_action
+		if lower_clean.startswith(("click", "left click", "right click", "double click", "tap ")):
 			btn = "right" if "right" in lower_clean else "left"
 			clicks = 2 if "double" in lower_clean else 1
 			m = re.search(r"(\d+)\s*[,x\s]\s*(\d+)", lower_clean)
-			x, y = (int(m.group(1)), int(m.group(2))) if m else (None, None)
-			res = execute_remote_action("click", button=btn, clicks=clicks, x=x, y=y)
+			if m:
+				from tools.remote_control import execute_remote_action
+				x, y = int(m.group(1)), int(m.group(2))
+				res = execute_remote_action("click", button=btn, clicks=clicks, x=x, y=y)
+				return res.get("spoken", f"Clicked at ({x}, {y}), sir.")
+
+			# Check if there is a named UI target (e.g. "click on file", "click on edit", "click on start a new convo")
+			target_entity = (intent.extracted_entities or {}).get("target", "") if intent else ""
+			if not target_entity:
+				raw_tgt = re.sub(r"^(?:click\s+(?:on\s+)?|left\s+click\s+(?:on\s+)?|right\s+click\s+(?:on\s+)?|double\s+click\s+(?:on\s+)?|tap\s+(?:on\s+)?|press\s+on\s+)(?:the\s+|a\s+|an\s+|my\s+)?", "", lower_clean).strip()
+				raw_tgt = re.sub(r"[, ]+\b(?:jarvis|please|for me|thank you|thanks)\b[.?!]?$", "", raw_tgt, flags=re.I).strip(" .,?!")
+				if raw_tgt and raw_tgt not in ("it", "that", "this", "screen", "here", "button"):
+					target_entity = raw_tgt
+
+			if target_entity:
+				if any(k in target_entity for k in ("new convo", "new conversation", "new chat", "start a new convo")):
+					from tools.remote_control import execute_remote_action
+					res = execute_remote_action("new_convo")
+					return res.get("spoken", "Opened a new convo, sir.")
+
+				try:
+					from core.screencontrol import get_screen_controller
+					action_res = get_screen_controller().click_ui_element(target_entity)
+					if action_res and action_res.message:
+						return action_res.message
+				except Exception as click_err:
+					print(f"[CLICK UI] Failed to click '{target_entity}': {click_err}")
+
+			# Default: click at current mouse position
+			from tools.remote_control import execute_remote_action
+			res = execute_remote_action("click", button=btn, clicks=clicks, x=None, y=None)
 			return res.get("spoken", "Clicked, sir.")
 
 		if lower_clean.startswith(("scroll down", "scroll up", "scroll")):

@@ -13,9 +13,10 @@
   <link rel="apple-touch-icon" href="icon.png">
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css?v=2026.09.26.6">
+  <link rel="stylesheet" href="style.css?v=2026.09.26.11">
 </head>
 <body data-state="offline" data-theme="dark" data-view="brain">
+  <audio id="phoneAudioPlayer" preload="auto" playsinline webkit-playsinline></audio>
 
   <div class="grid-lines" aria-hidden="true"></div>
 
@@ -103,12 +104,40 @@
         </div>
 
         <div class="core-voice-controls" id="coreVoiceControls">
+          <!-- Real-Time Neural Soundwave / Spectrum Visualizer -->
+          <div class="voice-spectrum-container" id="voiceSpectrumContainer" aria-hidden="true">
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+          </div>
           <div class="live-transcript" id="liveTranscript" hidden></div>
           <div class="core-response-bubble" id="coreResponseBubble" hidden></div>
           <p class="core-state-text" id="stateDetail">Listening continuously…</p>
+          <div class="voice-mode-row">
+            <button type="button" class="btn-voice-toggle active" id="btnVoiceToggle" title="Toggle hands-free continuous listening">
+              <span class="mic-dot-pulse"></span> <span id="voiceToggleLabel">Hands-Free Mic Active</span>
+            </button>
+          </div>
           <button type="button" class="btn-activate-voice" id="btnActivateVoice" hidden>
             <span class="mic-dot-pulse"></span> Tap to Enable Hands-Free Voice
           </button>
+
+          <!-- Natural Voice Command Suggestions -->
+          <div class="core-prompt-chips">
+            <button type="button" class="core-chip" data-cmd="what do you see on my pc">&#128248; What's on my PC?</button>
+            <button type="button" class="core-chip" data-cmd="click on file">&#128194; Click File Menu</button>
+            <button type="button" class="core-chip" data-cmd="start a new convo">&#9889; New Conversation</button>
+            <button type="button" class="core-chip" data-cmd="switch to chrome">&#127760; Switch to Chrome</button>
+          </div>
         </div>
       </section>
 
@@ -149,48 +178,104 @@
           <button type="button" class="btn-back-pill" id="btnBackFromScreen">&#8592; Core</button>
           <div class="section-title">
             <span>&#128187; Live PC Mirror</span>
-            <small id="screenTimestamp" class="live-pulse-badge">&#9679; LIVE STREAM</small>
+            <small id="screenTimestamp" class="live-pulse-badge">&#9679; LIVE</small>
           </div>
           <div class="header-action-group">
+            <button type="button" class="btn-mode-pill" id="btnStreamMode" title="Toggle Turbo Frame mode vs Stream">&#9889; Turbo</button>
             <button type="button" class="btn-primary-small btn-maximize-pill" id="btnMaximizeScreen" title="Maximize Screen Mirror">
-              <span>&#x26F6;</span> Maximize
+              <span>&#x26F6;</span> Full
             </button>
           </div>
         </div>
 
-        <button type="button" class="btn-fullscreen-hero" id="btnHeroFullscreen">
-          <span>&#x26F6;</span> Open Full Screen PC Mirror
-        </button>
+        <!-- Live Detected Tabs & Windows Ribbon -->
+        <div class="screen-ribbon-container">
+          <div class="screen-tabs-ribbon" id="screenTabsRibbon">
+            <span class="ribbon-chip-placeholder">Scanning open tabs…</span>
+          </div>
+        </div>
 
+        <!-- Interactive Screen Container -->
         <div class="screen-preview-wrapper" id="screenWrapper">
           <img id="pcScreenImg" class="screen-image" src="/api/screen/stream" alt="Live PC Mirror"
                onerror="this.src='/latest_screenshot.png?t=' + Date.now();"
                onload="var ph = document.getElementById('screenPlaceholder'); if (ph) ph.style.display='none';">
           <div class="screen-overlay-bar">
-            <button type="button" class="screen-overlay-btn" id="btnOverlayMaximize">&#x26F6; Fullscreen Mirror</button>
+            <span class="screen-zoom-badge" id="zoomBadge">1.0x</span>
+            <button type="button" class="screen-overlay-btn" id="btnZoomIn">&#128269; +</button>
+            <button type="button" class="screen-overlay-btn" id="btnZoomOut">&#128269; &minus;</button>
+            <button type="button" class="screen-overlay-btn" id="btnZoomReset">1:1</button>
             <button type="button" class="screen-overlay-btn" id="btnToggleStream">&#9208; Pause</button>
           </div>
-          <div class="screen-tap-hint">Tap anywhere on screen to click on PC &bull; Tap "Maximize" for edge-to-edge view</div>
+          <div class="screen-tap-hint">Tap: Click &bull; 2-Finger / Swipe: Scroll &bull; Long Press: Right Click &bull; Double Tap: 2x Click</div>
           <div class="screen-placeholder" id="screenPlaceholder" style="display:none;">
             <div class="placeholder-icon">&#128187;</div>
             <strong>Connecting to live desktop…</strong>
-            <p>Direct video stream connecting</p>
+            <p>Direct live mirror connecting</p>
           </div>
         </div>
 
+        <!-- Ergonomic Floating Touch Dock for Mobile -->
+        <div class="screen-touch-dock" id="screenTouchDock">
+          <button type="button" class="touch-dock-btn active" id="btnTouchLeftClick" data-touch-action="left_click">
+            <span class="dock-btn-icon">&#128070;</span>
+            <span class="dock-btn-label">Left</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnTouchRightClick" data-touch-action="right_click">
+            <span class="dock-btn-icon">&#128433;&#65039;</span>
+            <span class="dock-btn-label">Right</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnTouchDblClick" data-touch-action="double_click">
+            <span class="dock-btn-icon">&#9996;&#65039;</span>
+            <span class="dock-btn-label">2x Click</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnDockScrollUp" data-touch-action="scroll_up">
+            <span class="dock-btn-icon">&#9650;</span>
+            <span class="dock-btn-label">Scroll Up</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnDockScrollDown" data-touch-action="scroll_down">
+            <span class="dock-btn-icon">&#9660;</span>
+            <span class="dock-btn-label">Scroll Dn</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnToggleVirtualKeyboard" title="Open Virtual Keyboard">
+            <span class="dock-btn-icon">&#9000;</span>
+            <span class="dock-btn-label">Keys</span>
+          </button>
+        </div>
+
+        <!-- Virtual Keyboard & Text Sending Drawer -->
+        <div class="virtual-key-drawer" id="virtualKeyDrawer" hidden>
+          <div class="drawer-input-row">
+            <input type="text" id="pcKeyboardInput" placeholder="Type text to send to active PC window..." autocomplete="off">
+            <button type="button" class="btn-send-keys" id="btnSendKeyText">Send &#9166;</button>
+          </div>
+          <div class="drawer-keys-row">
+            <button type="button" class="v-key" data-key="enter">&#9166; Enter</button>
+            <button type="button" class="v-key" data-key="backspace">&#9003; Bksp</button>
+            <button type="button" class="v-key" data-key="escape">Esc</button>
+            <button type="button" class="v-key" data-key="tab">&#8677; Tab</button>
+            <button type="button" class="v-key" data-key="space">&#9251; Space</button>
+            <button type="button" class="v-key" data-key="win">&#8862; Win</button>
+            <button type="button" class="v-key" data-key="up">&#9650;</button>
+            <button type="button" class="v-key" data-key="down">&#9660;</button>
+            <button type="button" class="v-key" data-key="left">&#9664;</button>
+            <button type="button" class="v-key" data-key="right">&#9654;</button>
+            <button type="button" class="v-key" data-cmd="Ctrl+C">Copy</button>
+            <button type="button" class="v-key" data-cmd="Ctrl+V">Paste</button>
+            <button type="button" class="v-key" data-cmd="Ctrl+Z">Undo</button>
+            <button type="button" class="v-key" data-cmd="Ctrl+A">All</button>
+          </div>
+        </div>
+
+        <!-- Screen Quick Commands Bar -->
         <div class="screen-quick-bar">
-          <button type="button" class="screen-action-chip" data-cmd="what is on my screen">&#128248; Read Screen</button>
-          <button type="button" class="screen-action-chip" data-cmd="Take a screenshot">&#128247; Screenshot</button>
-          <button type="button" class="screen-action-chip" data-action="click">&#128070; Click</button>
-          <button type="button" class="screen-action-chip" data-action="right_click">&#128433;&#65039; Right Click</button>
-          <button type="button" class="screen-action-chip" data-action="scroll_down">&#11015;&#65039; Scroll Down</button>
-          <button type="button" class="screen-action-chip" data-action="scroll_up">&#11014;&#65039; Scroll Up</button>
-          <button type="button" class="screen-action-chip" data-action="volume_up">&#128266; Vol +</button>
-          <button type="button" class="screen-action-chip" data-action="volume_down">&#128265; Vol &minus;</button>
-          <button type="button" class="screen-action-chip" data-action="play_pause">&#9199; Play/Pause</button>
+          <button type="button" class="screen-action-chip" data-cmd="what do you see on my pc">&#128248; What's on PC?</button>
+          <button type="button" class="screen-action-chip" data-cmd="click on file">&#128194; Click File</button>
+          <button type="button" class="screen-action-chip" data-cmd="click on edit">&#9999;&#65039; Click Edit</button>
+          <button type="button" class="screen-action-chip" data-cmd="start a new convo">&#9889; New Convo</button>
           <button type="button" class="screen-action-chip" data-action="show_desktop">&#128451;&#65039; Desktop</button>
           <button type="button" class="screen-action-chip" data-action="locate_laptop">&#128205; Find PC</button>
-          <button type="button" class="screen-action-chip" data-action="lock_pc">&#128274; Lock</button>
+          <button type="button" class="screen-action-chip" data-action="lock_pc">&#128274; Lock PC</button>
         </div>
       </section>
 
@@ -312,10 +397,20 @@
     <form class="command-bar" id="commandForm">
       <input id="commandInput" autocomplete="off" spellcheck="false"
              placeholder="Message JARVIS or tap mic…" aria-label="Message JARVIS">
-      <button class="input-mic" type="button" id="inputMicButton" aria-label="Voice input" title="Tap to Speak"><span></span></button>
+      <button class="input-mic" type="button" id="inputMicButton" aria-label="Voice input" title="Tap to Speak">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+      </button>
       <button class="send-button" type="submit" aria-label="Send message">
-        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3 10 L17 4 L12 10 L17 16 Z"/></svg>
-        Send
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="22" y1="2" x2="11" y2="13"></line>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        </svg>
+        <span>Send</span>
       </button>
     </form>
 
@@ -580,7 +675,7 @@
   <span id="micLabel" style="display:none;">Mic idle</span>
   <span id="stateText" style="display:none;">JARVIS</span>
 
-  <script src="qr.js?v=2026.09.26.6"></script>
-  <script src="app.js?v=2026.09.26.6"></script>
+  <script src="qr.js?v=2026.09.26.11"></script>
+  <script src="app.js?v=2026.09.26.11"></script>
 </body>
 </html>

@@ -147,7 +147,12 @@ def test_press_key_and_hotkey_pass_through(executor, full_control, monkeypatch):
     assert ("hotkey", ("ctrl", "c")) in seen
 
 
-def test_capability_layer_reflects_verification():
+def test_capability_layer_reflects_verification(monkeypatch):
+    import core.screencontrol as sc
+    monkeypatch.setattr(sc.ScreenControlExecutor, "click_ui_element",
+                        lambda self, label: ActionResult(False, "target_not_found", "click_ui_element",
+                                                         arguments={"label": label},
+                                                         message=f"I couldn't find '{label}' on screen, so I didn't click anything."))
     result = execute_capability("screen.click_element", label="Search")
     assert result.success is False
     assert result.verification is None

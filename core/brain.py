@@ -30,11 +30,12 @@ SYSTEM_PROMPT = (
     "Use the capability registry supplied in each request as the source of truth. "
     "Be natural, conversational, concise, and useful. Avoid unnecessary lists, preambles, or theatrical language. "
     "NATURAL VOICE CONVERSATION RULES: "
-    "1. Speak naturally, warmly, and concisely like Tony Stark's JARVIS. "
-    "2. Keep voice responses strictly to 1 or 2 short sentences (maximum 25 words total). "
-    "3. NEVER give long monologues, moral essays, or robotic system narration (e.g. NEVER say '(system.info)', 'According to my system info', 'As your companion, I want to acknowledge that it is okay to feel this way'). "
-    "4. When the user asks how they are doing or for a status check, give a crisp, reassuring answer in one sentence. "
-    "5. Only provide detailed answers if the user explicitly asks to 'explain in detail'. "
+    "1. Speak naturally, warmly, and concisely like Tony Stark's JARVIS — with quiet confidence and wit. "
+    "2. For casual conversation, keep responses to 1-2 sentences. "
+    "3. For screen descriptions, file contents, or technical questions, give useful detail — describe what you actually see with specifics (app names, tab titles, visible text, button labels). "
+    "4. NEVER give long monologues, moral essays, or robotic system narration. "
+    "5. When describing the screen, be specific and actionable: name the application, visible tabs, buttons, and text. Don't be vague. "
+    "6. When the user asks you to click on something, interact with something, or navigate the UI, identify it precisely from the screen context and act on it. "
     "For simple questions, answer directly. For complex requests, reason through the task and use the available capabilities when appropriate."
 )
 
@@ -88,8 +89,34 @@ class Brain:
             ) from exc
 
     def _is_screen_dependent(self, prompt: str) -> bool:
+        """Detect whether the user's request requires fresh screen perception.
+
+        Uses broad natural-language matching instead of just a few keywords
+        so phrases like 'click on File', 'what tabs are open', 'read what's
+        on the monitor' all trigger a screen capture.
+        """
         lower = prompt.lower()
-        return any(k in lower for k in ("screen", "what do you see", "look at", "what's open", "ocr", "window"))
+        # Direct screen keywords
+        if any(k in lower for k in (
+            "screen", "what do you see", "look at", "what's open", "what is open",
+            "ocr", "window", "monitor", "display", "desktop",
+            "what's on my", "what is on my", "read my screen",
+            "what's happening", "what is happening",
+            "what app", "which app", "which tab", "what tab",
+            "what browser", "which browser",
+        )):
+            return True
+        # UI interaction phrases
+        if any(k in lower for k in (
+            "click on", "click the", "tap on", "tap the", "press the",
+            "find the button", "find the text", "where is the",
+            "open the menu", "close the tab", "switch tab",
+            "file menu", "edit menu", "view menu", "help menu",
+            "start a new", "new conversation", "new chat",
+            "scroll down", "scroll up", "scroll the",
+        )):
+            return True
+        return False
 
     def _build_context(self) -> str:
         """Build the full desktop context when screen perception is required."""
@@ -110,18 +137,26 @@ class Brain:
         if needs_desktop:
             context = f"{SYSTEM_PROMPT}\n\n{self._build_context()}\n"
         else:
-            # Ultra-fast conversational path (bypasses 2s OCR + 2500 token CPU prompt evaluation)
+            # Fast conversational path with basic window awareness
+            try:
+                from perception.window import get_active_window
+                win = get_active_window()
+                window_hint = f"\nCurrent active window: {win.title} ({win.app_name})\n"
+            except Exception:
+                window_hint = ""
             context = (
                 "You are JARVIS, Tony Stark's personal British AI assistant. "
                 "Speak naturally, warmly, with quiet confidence and wit. "
-                "Respond strictly in 1-2 concise sentences (under 30 words total). Never ramble.\n"
+                "For casual conversation, keep it to 1-2 concise sentences. "
+                "For technical questions or when the user asks about their PC, give useful specifics. "
+                "Never ramble or give moral lectures.\n"
+                f"{window_hint}"
             )
 
         history_text = ""
         if self.history:
             history_parts = []
-            # Keep only the last 4 turns for rapid CPU prompt evaluation
-            for message in self.history[-4:]:
+            for message in self.history[-6:]:
                 role = message.get("role", "unknown").upper()
                 content = message.get("content", "")
                 history_parts.append(f"{role}: {content}")
@@ -160,11 +195,13 @@ class Brain:
 
         try:
             query = self._build_query(prompt)
+            # Screen-dependent queries need more tokens for useful descriptions
+            tokens = 200 if self._is_screen_dependent(prompt) else 120
 
             response = self._jarvis.ask(
                 query,
                 model=self.model,
-                max_tokens=65,
+                max_tokens=tokens,
                 context=False,
             ).strip()
 
@@ -199,7 +236,8 @@ class Brain:
         """
 
         if options is None:
-            options = {"num_predict": 65}
+            tokens = 200 if self._is_screen_dependent(prompt) else 120
+            options = {"num_predict": tokens}
 
         query = self._build_query(prompt)
 

@@ -222,6 +222,14 @@ class JarvisHandler(BaseHTTPRequestHandler):
 		if path == "/api/screen/frame":
 			self._send_screen_frame()
 			return
+		if path == "/api/desktop/summary":
+			try:
+				from perception.tabs import get_tabs_and_menus
+				data = get_tabs_and_menus()
+				self._send_json(200, {"ok": True, **data})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
 		if path == "/api/tts":
 			self._handle_tts(parsed.query)
 			return
@@ -597,11 +605,19 @@ class JarvisHandler(BaseHTTPRequestHandler):
 					wav_buf = io.BytesIO(audio_bytes)
 					try:
 						with sr.AudioFile(wav_buf) as source:
+							recognizer.energy_threshold = 150
+							recognizer.dynamic_energy_threshold = False
 							audio_data = recognizer.record(source)
 						try:
-							text = recognizer.recognize_google(audio_data).strip()
+							text = recognizer.recognize_google(audio_data, language="en-US").strip()
 						except sr.UnknownValueError:
-							text = ""
+							try:
+								text = recognizer.recognize_google(audio_data, language="en-GB").strip()
+							except Exception:
+								try:
+									text = recognizer.recognize_google(audio_data, language="en-IN").strip()
+								except Exception:
+									text = ""
 					except Exception as we:
 						print(f"[VOICE] Direct WAV read error: {we}")
 				else:
@@ -622,9 +638,12 @@ class JarvisHandler(BaseHTTPRequestHandler):
 						with sr.AudioFile(wav_path) as source:
 							audio_data = recognizer.record(source)
 						try:
-							text = recognizer.recognize_google(audio_data).strip()
+							text = recognizer.recognize_google(audio_data, language="en-US").strip()
 						except sr.UnknownValueError:
-							text = ""
+							try:
+								text = recognizer.recognize_google(audio_data, language="en-GB").strip()
+							except Exception:
+								text = ""
 					except Exception:
 						pass
 					finally:
@@ -636,9 +655,14 @@ class JarvisHandler(BaseHTTPRequestHandler):
 								pass
 
 				if text:
+					if hasattr(self.manager, "interpreter") and hasattr(self.manager.interpreter, "normalize_speech_input"):
+						normalized = self.manager.interpreter.normalize_speech_input(text)
+						if normalized:
+							text = normalized
 					source = body.get("source", "remote_voice")
 					print(f"[VOICE] Recognized from client: '{text}'")
-					self.manager.submit_text(text, source=source)
+					if body.get("execute", False):
+						self.manager.submit_text(text, source=source)
 					self._send_json(200, {"ok": True, "text": text})
 				else:
 					self._send_json(200, {"ok": True, "text": ""})

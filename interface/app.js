@@ -388,10 +388,54 @@ function toast(text, isError) {
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), 3200);
 }
 
-let currentTtsAudio = null;
 let lastSpokenPhoneText = '';
 let lastSpokenPhoneTime = 0;
 let greetingSpoken = false;
+let audioUnlocked = false;
+
+function getPhoneAudioPlayer() {
+  let player = document.getElementById('phoneAudioPlayer');
+  if (!player) {
+    player = document.createElement('audio');
+    player.id = 'phoneAudioPlayer';
+    player.preload = 'auto';
+    player.setAttribute('playsinline', '');
+    player.setAttribute('webkit-playsinline', '');
+    document.body.appendChild(player);
+  }
+  return player;
+}
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+
+  try {
+    const player = getPhoneAudioPlayer();
+    player.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+    const p = player.play();
+    if (p !== undefined) {
+      p.then(() => { player.pause(); }).catch(() => {});
+    }
+  } catch (_) {}
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (AudioContextClass) {
+    try {
+      const ctx = new AudioContextClass();
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    } catch (_) {}
+  }
+
+  try {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.resume();
+    }
+  } catch (_) {}
+}
+['touchstart', 'touchend', 'click', 'keydown'].forEach(evt => {
+  document.addEventListener(evt, unlockAudio, { passive: true });
+});
 
 function speakOnPhone(text) {
   if (!app.phoneAudio) {
@@ -399,11 +443,12 @@ function speakOnPhone(text) {
     resumeContinuousVoice();
     return;
   }
+
+  unlockAudio();
+
   // Strip code blocks, links, and markdown formatting so speech is concise and clean
-  let clean = (text || '');
-  if (clean.includes('```')) {
-    clean = clean.split('```')[0].trim();
-  }
+  let clean = (text || '').trim();
+  clean = clean.replace(/```[\s\S]*?```/g, '');
   clean = clean.replace(/https?:\/\/\S+/g, '');
   clean = clean.replace(/[*_#`📁🤖⚠️💻🎥]/g, '').trim();
   if (!clean) {
@@ -412,71 +457,67 @@ function speakOnPhone(text) {
     return;
   }
 
-  // Deduplication guard: ignore repeated speech calls within 4 seconds
+  // Deduplication guard: ignore repeated speech calls within 3.5 seconds
   const norm = clean.toLowerCase().replace(/[^a-z0-9]/g, '');
   const now = Date.now();
-  if (norm && norm === lastSpokenPhoneText && (now - lastSpokenPhoneTime < 4200)) {
-    console.log('[TTS] Dropped rapid duplicate phone speech:', clean);
+  if (norm && norm === lastSpokenPhoneText && (now - lastSpokenPhoneTime < 3500)) {
     return;
   }
   lastSpokenPhoneText = norm;
   lastSpokenPhoneTime = now;
 
-  // 1. Authentic British Neural Voice via /api/tts (edge-tts en-GB-RyanNeural)
+  setBodyState('speaking');
+  updateStatusCaption('Speaking…');
+  pauseContinuousVoice();
+
+  if ('speechSynthesis' in window) {
+    try { window.speechSynthesis.cancel(); } catch(_) {}
+  }
+
+  const player = getPhoneAudioPlayer();
+  const ttsUrl = '/api/tts?text=' + encodeURIComponent(clean);
+
+  let finished = false;
+  const onFinish = () => {
+    if (finished) return;
+    finished = true;
+    if (app.state === 'speaking') {
+      setBodyState('listening');
+      updateStatusCaption('Listening continuously…');
+    }
+    setTimeout(resumeContinuousVoice, 180);
+  };
+
   try {
-    if (currentTtsAudio) {
-      try {
-        currentTtsAudio.pause();
-        currentTtsAudio.src = '';
-      } catch(_) {}
-      currentTtsAudio = null;
-    }
-    if ('speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel(); } catch(_) {}
-    }
-
-    const ttsUrl = '/api/tts?text=' + encodeURIComponent(clean);
-    const audio = new Audio(ttsUrl);
-    currentTtsAudio = audio;
-
-    let finished = false;
-    const onFinish = () => {
-      if (finished) return;
-      finished = true;
-      if (currentTtsAudio === audio) currentTtsAudio = null;
-      if (app.state === 'speaking') setBodyState('listening');
-      setTimeout(resumeContinuousVoice, 120);
-    };
-
-    audio.onplay = () => {
+    player.pause();
+    player.onplay = () => {
       setBodyState('speaking');
+      updateStatusCaption('Speaking…');
     };
-    audio.onended = onFinish;
-    audio.onerror = (e) => {
+    player.onended = onFinish;
+    player.onerror = (e) => {
       console.warn('[TTS] Audio endpoint error, falling back to local synthesis:', e);
-      if (currentTtsAudio === audio) {
-        fallbackSpeechSynthesis(clean, onFinish);
-      }
+      fallbackSpeechSynthesis(clean, onFinish);
     };
 
-    // Safety timeout in case playback hangs
+    player.src = ttsUrl;
+    player.currentTime = 0;
+
     const words = clean.split(/\s+/).length;
-    const approxDurationMs = Math.max(2200, words * 450);
+    const approxDurationMs = Math.max(2500, words * 450);
     setTimeout(onFinish, approxDurationMs + 4000);
 
-    const playPromise = audio.play();
+    const playPromise = player.play();
     if (playPromise !== undefined) {
       playPromise.catch((err) => {
-        // If aborted because user triggered another command or sound was paused, do not trigger fallback voice
-        if (err && err.name === 'AbortError') {
-          return;
-        }
-        console.warn('[TTS] Autoplay blocked, falling back:', err);
+        if (err && err.name === 'AbortError') return;
+        console.warn('[TTS] Player autoplay blocked, falling back:', err);
         fallbackSpeechSynthesis(clean, onFinish);
       });
     }
   } catch(err) {
-    fallbackSpeechSynthesis(clean, null);
+    console.warn('[TTS] Audio error:', err);
+    fallbackSpeechSynthesis(clean, onFinish);
   }
 }
 
@@ -509,7 +550,7 @@ function fallbackSpeechSynthesis(clean, onFinishCallback) {
         setTimeout(resumeContinuousVoice, 100);
       }
     };
-    u.onstart = () => setBodyState('speaking');
+    u.onstart = () => { setBodyState('speaking'); updateStatusCaption('Speaking…'); };
     u.onend = finish;
     u.onerror = finish;
     window.speechSynthesis.speak(u);
@@ -517,41 +558,6 @@ function fallbackSpeechSynthesis(clean, onFinishCallback) {
     if (onFinishCallback) onFinishCallback();
   }
 }
-
-let audioUnlocked = false;
-function unlockAudio() {
-  if (audioUnlocked) return;
-  audioUnlocked = true;
-
-  // Unlock Web Audio context for iPhone
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (AudioContextClass) {
-    try {
-      const ctx = new AudioContextClass();
-      if (ctx.state === 'suspended') ctx.resume();
-    } catch (_) {}
-  }
-  // Unlock HTML5 Audio via silent buffer
-  try {
-    const silent = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
-    silent.play().catch(() => {});
-  } catch (_) {}
-
-  // Speak Starting Greeting on first touch of the interface!
-  if (!greetingSpoken) {
-    greetingSpoken = true;
-    setTimeout(() => {
-      const greeting = "JARVIS online, sir. All systems are operational.";
-      showCoreResponse(greeting);
-      speakOnPhone(greeting);
-    }, 280);
-  }
-
-  document.removeEventListener('touchstart', unlockAudio);
-  document.removeEventListener('click', unlockAudio);
-}
-document.addEventListener('touchstart', unlockAudio, { passive: true, once: true });
-document.addEventListener('click', unlockAudio, { passive: true, once: true });
 
 const coreResponseBubble = document.getElementById('coreResponseBubble');
 let responseBubbleTimer = null;
@@ -737,8 +743,14 @@ async function sendCommand(text, source = 'text') {
   if (!clean) return;
   if (commandInput) commandInput.value = '';
 
-  // 1. Immediately show user message on screen
-  addMessage('user', clean);
+  unlockAudio();
+
+  // Deduplicate user message if already displayed
+  const lastUserMsg = messagesEl ? messagesEl.querySelector('.message.user:last-child') : null;
+  const lastUserText = lastUserMsg ? lastUserMsg.textContent : '';
+  if (!lastUserText.includes(clean)) {
+    addMessage('user', clean);
+  }
   showCoreResponse(`"${clean}"`);
   setBodyState('processing');
   updateStatusCaption('Thinking…');
@@ -750,26 +762,23 @@ async function sendCommand(text, source = 'text') {
   try {
     const res = await postJSON('/api/command', { text: clean, source, wait: true });
     if (res && res.response) {
-      const sseActive = Boolean(eventSource && eventSource.readyState === EventSource.OPEN);
-      // If SSE is connected, handleBackendMessage already received and spoke the response!
-      if (!sseActive) {
-        addMessage('assistant', res.response);
-        showCoreResponse(res.response);
-        speakOnPhone(res.response);
+      const respText = res.response.trim();
+      const lastAsstMsg = messagesEl ? messagesEl.querySelector('.message.jarvis:last-child') : null;
+      const lastAsstText = lastAsstMsg ? lastAsstMsg.textContent : '';
+      if (!lastAsstText.includes(respText)) {
+        addMessage('assistant', respText);
       }
+      showCoreResponse(respText);
+      speakOnPhone(respText);
       setBodyState('listening');
       updateStatusCaption('Listening continuously…');
     }
   } catch(e) {
     console.warn('Command dispatch error:', e);
     toast('JARVIS not responding.', true);
-    setBodyState('offline');
-    setTimeout(() => {
-      if (app.state === 'offline') {
-        setBodyState('listening');
-        resumeContinuousVoice();
-      }
-    }, 2500);
+    setBodyState('listening');
+    updateStatusCaption('Listening continuously…');
+    resumeContinuousVoice();
   }
 }
 
@@ -879,17 +888,43 @@ function updateStatusCaption(text) {
   if (stateDetail) stateDetail.textContent = text;
 }
 
+function cleanSpokenTranscript(text) {
+  let s = (text || '').trim();
+  // Strip wake-words & preambles STT habitually inserts
+  s = s.replace(/^(?:hey\s+|ok\s+|okay\s+|hello\s+|hi\s+)?(?:jarvis|javis|travis|service)[,\s:\-]+/i, '');
+  s = s.replace(/^(?:please|can you|could you)\s+/i, '');
+
+  // Strip trailing wake words & politeness fillers
+  s = s.replace(/[, ]+\b(?:hey\s+)?(?:jarvis|javis|travis|service)\b[.?!]?$/i, '');
+  s = s.replace(/[, ]+\b(?:please|for me|thank you|thanks)\b[.?!]?$/i, '');
+
+  // Common iPhone speech dictation acoustic mishearings:
+  s = s.replace(/\b(?:on\s+my|on)\s+peace\b/gi, 'on my PC');
+  s = s.replace(/\b(?:on\s+my|on)\s+piece\b/gi, 'on my PC');
+  s = s.replace(/\bwhat do you see on my piece of(?:\s+pc)?\b/gi, 'what do you see on my PC');
+  s = s.replace(/\bwhat do you see on my piece(?:\s+pc)?\b/gi, 'what do you see on my PC');
+  s = s.replace(/\b(?:on\s+)?ice\s*cream\b/gi, 'on my screen');
+  s = s.replace(/\bclick\s+on\s+(?:fell|fail|foul)\b/gi, 'click on file');
+  s = s.replace(/\b(?:are\s+you|am\s+i|you\s+are)?\s*audible(?:\s+to\s+you)?\b/gi, 'can you hear me');
+  s = s.replace(/\bstart a new combo\b/gi, 'start a new convo');
+  s = s.replace(/\bstart a new combat\b/gi, 'start a new convo');
+  s = s.replace(/\bstart a new conversation\b/gi, 'start a new convo');
+
+  return s.trim();
+}
+
 let _lastSpokenCmd = '';
 let _lastSpokenTime = 0;
 
 // Spoken command dispatch with strict deduplication guard
 function handleSpokenCommand(text) {
-  const clean = (text || '').trim();
+  const raw = (text || '').trim();
+  if (!raw) return;
+  const clean = cleanSpokenTranscript(raw) || raw;
   if (!clean) return;
 
   const now = Date.now();
   if (clean.toLowerCase() === _lastSpokenCmd.toLowerCase() && (now - _lastSpokenTime < 2400)) {
-    console.log('[VOICE DEDUP] Blocked duplicate speech command within 2.4s:', clean);
     return;
   }
   _lastSpokenCmd = clean;
@@ -901,7 +936,7 @@ function handleSpokenCommand(text) {
     speechSilenceTimer = null;
   }
 
-  // If Fullscreen Mirror is open, route directly to the simultaneous mirror voice engine!
+  // If Fullscreen Mirror is open, route directly to mirror voice engine
   if (typeof isMirrorModalOpen === 'function' && isMirrorModalOpen()) {
     if (typeof executeMirrorVoiceCommand === 'function') {
       executeMirrorVoiceCommand(clean);
@@ -910,12 +945,12 @@ function handleSpokenCommand(text) {
   }
 
   showLiveTranscript(`"${clean}"`);
-  addMessage('user', clean);
+  unlockAudio();
   setBodyState('processing');
   isVoicePaused = true;
   pauseContinuousVoice();
   try { if (navigator.vibrate) navigator.vibrate(30); } catch(_){}
-  sendCommand(clean, 'remote');
+  sendCommand(clean, 'remote_voice');
 }
 
 // 1. Continuous Web Speech API (Safari iOS & Chrome desktop/Android)
@@ -947,12 +982,11 @@ function startContinuousRecognition() {
     }
 
     const r = new SpeechRecognition();
-    // On iOS Safari, continuous = true locks up the audio unit after a few seconds.
-    // Use single-turn (continuous = false) on iOS, and auto re-arm on onend!
     r.continuous = !isMobileSafari();
     r.interimResults = true;
     r.maxAlternatives = 1;
-    r.lang = navigator.language || 'en-US';
+    const userLang = navigator.language || 'en-US';
+    r.lang = userLang.startsWith('en') ? userLang : 'en-US';
 
     r.onstart = () => {
       isRecognitionRunning = true;
@@ -970,40 +1004,43 @@ function startContinuousRecognition() {
 
     r.onresult = (ev) => {
       if (isVoicePaused) return;
-      let interim = '', final = '';
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        if (ev.results[i].isFinal) final += ev.results[i][0].transcript;
-        else interim += ev.results[i][0].transcript;
+
+      // Accumulate the FULL sentence from index 0 across all results to prevent word dropping
+      let fullTranscript = '';
+      let lastIsFinal = false;
+      for (let i = 0; i < ev.results.length; i++) {
+        const item = ev.results[i][0];
+        if (!item || !item.transcript) continue;
+        const chunk = item.transcript.trim();
+        if (chunk) {
+          if (fullTranscript && !fullTranscript.endsWith(' ') && !chunk.startsWith(' ')) {
+            fullTranscript += ' ';
+          }
+          fullTranscript += chunk;
+        }
+        if (i === ev.results.length - 1) {
+          lastIsFinal = !!ev.results[i].isFinal;
+        }
       }
-      const text = (final || interim || '').trim();
+      const text = fullTranscript.trim();
       if (!text) return;
 
       latestSpeechTranscript = text;
       showLiveTranscript(`"${text}"`);
       triggerShockwave(0.5);
+      updateStatusCaption(`Listening: "${text}"`);
 
-      // If marked final, dispatch after a very short breath
-      if (final) {
-        if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
-        speechSilenceTimer = setTimeout(() => {
-          if (latestSpeechTranscript && !isVoicePaused) {
-            const cmd = latestSpeechTranscript;
-            latestSpeechTranscript = '';
-            handleSpokenCommand(cmd);
-          }
-        }, 180);
-      } else {
-        // Safety silence timer: if user stops speaking for 550ms, dispatch interim text!
-        // This solves iOS Safari where isFinal is never emitted!
-        if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
-        speechSilenceTimer = setTimeout(() => {
-          if (latestSpeechTranscript && !isVoicePaused) {
-            const cmd = latestSpeechTranscript;
-            latestSpeechTranscript = '';
-            handleSpokenCommand(cmd);
-          }
-        }, 550);
-      }
+      if (speechSilenceTimer) clearTimeout(speechSilenceTimer);
+      // Wait 1000ms if engine detected a natural sentence break, or 1600ms if still mid-sentence
+      const delay = lastIsFinal ? 1000 : 1600;
+      speechSilenceTimer = setTimeout(() => {
+        if (latestSpeechTranscript && !isVoicePaused) {
+          const cmd = latestSpeechTranscript;
+          latestSpeechTranscript = '';
+          speechSilenceTimer = null;
+          handleSpokenCommand(cmd);
+        }
+      }, delay);
     };
 
     r.onerror = (ev) => {
@@ -1013,12 +1050,12 @@ function startContinuousRecognition() {
       if (ev.error === 'not-allowed') {
         if (btnActivateVoice) btnActivateVoice.hidden = false;
         updateStatusCaption('Tap mic to enable voice');
-      } else if (ev.error === 'audio-capture' || ev.error === 'network') {
+      } else if (ev.error === 'audio-capture' || ev.error === 'network' || ev.error === 'no-speech') {
         setTimeout(() => {
           if (continuousVoiceActive && !isVoicePaused && app.state !== 'speaking' && app.state !== 'processing') {
             startContinuousRecognition();
           }
-        }, 300);
+        }, 200);
       }
     };
 
@@ -1026,12 +1063,11 @@ function startContinuousRecognition() {
       isRecognitionRunning = false;
       if (inputMicBtn) inputMicBtn.classList.remove('listening-active');
 
-      // CRITICAL: If there was spoken text captured that hasn't dispatched yet, SEND IT NOW!
-      if (latestSpeechTranscript && !isVoicePaused) {
+      // If speechSilenceTimer is still counting down, let it finish naturally rather than abruptly cutting off!
+      if (!speechSilenceTimer && latestSpeechTranscript && !isVoicePaused) {
         const cmd = latestSpeechTranscript;
         latestSpeechTranscript = '';
         handleSpokenCommand(cmd);
-        return;
       }
 
       // Re-arm immediately for next sentence unless paused/speaking
@@ -1040,7 +1076,7 @@ function startContinuousRecognition() {
           if (continuousVoiceActive && !isVoicePaused && app.state !== 'speaking' && app.state !== 'processing') {
             startContinuousRecognition();
           }
-        }, 40);
+        }, 120);
       }
     };
 
@@ -1078,11 +1114,14 @@ async function startContinuousVAD() {
     vadIsSpeaking = false;
     vadSilenceDurationMs = 0;
     vadLastProcessTime = performance.now();
+    let vadPreRoll = [];
+    const MAX_PREROLL = 5; // ~420ms pre-speech buffer to preserve initial consonants
 
     continuousProcessor.onaudioprocess = (e) => {
       if (isVoicePaused) {
         continuousVADBuffer = [];
         vadIsSpeaking = false;
+        vadPreRoll = [];
         return;
       }
       const now = performance.now();
@@ -1094,7 +1133,18 @@ async function startContinuousVAD() {
       for (let i = 0; i < channel.length; i++) sum += channel[i] * channel[i];
       const rms = Math.sqrt(sum / channel.length);
 
-      const SPEECH_THRESHOLD = 0.016;
+      // Animate dynamic neural soundwave spectrum visualizer
+      const spectrumBars = document.querySelectorAll('.voice-spectrum-bar');
+      if (spectrumBars.length) {
+        const energy = Math.min(32, Math.max(4, Math.round(rms * 450)));
+        spectrumBars.forEach((bar, idx) => {
+          const wave = 0.5 + 0.5 * Math.sin(idx * 0.7 + now * 0.012);
+          const h = Math.min(32, Math.max(4, Math.round(energy * wave)));
+          bar.style.height = `${h}px`;
+        });
+      }
+
+      const SPEECH_THRESHOLD = 0.008;
 
       if (rms > SPEECH_THRESHOLD) {
         if (!vadIsSpeaking) {
@@ -1102,23 +1152,34 @@ async function startContinuousVAD() {
           triggerShockwave(0.85);
           setBodyState('listening');
           updateStatusCaption('Listening to you…');
+          continuousVADBuffer = [...vadPreRoll, new Float32Array(channel)];
+          vadPreRoll = [];
+        } else {
+          continuousVADBuffer.push(new Float32Array(channel));
         }
         vadSilenceDurationMs = 0;
-        continuousVADBuffer.push(new Float32Array(channel));
         if (continuousVADBuffer.length > 150) { // Max ~14s
           submitVADUtterance(inRate);
         }
       } else if (vadIsSpeaking) {
         continuousVADBuffer.push(new Float32Array(channel));
         vadSilenceDurationMs += elapsed;
-        if (vadSilenceDurationMs >= 750) { // 750ms silence = end of utterance
+        if (vadSilenceDurationMs >= 1000) { // 1.0s natural pause
           submitVADUtterance(inRate);
         }
+      } else {
+        vadPreRoll.push(new Float32Array(channel));
+        if (vadPreRoll.length > MAX_PREROLL) vadPreRoll.shift();
       }
     };
 
     source.connect(continuousProcessor);
-    continuousProcessor.connect(continuousAudioCtx.destination);
+    // Connect to muted gain node so microphone doesn't echo into speakers
+    const muteGain = continuousAudioCtx.createGain();
+    muteGain.gain.value = 0;
+    continuousProcessor.connect(muteGain);
+    muteGain.connect(continuousAudioCtx.destination);
+
     if (btnActivateVoice) btnActivateVoice.hidden = true;
     updateStatusCaption('Listening continuously…');
     if (app.state === 'idle' || app.state === 'offline') setBodyState('listening');
@@ -1220,6 +1281,32 @@ if (btnActivateVoice) {
   });
 }
 
+// Hands-free Voice Toggle in Core View
+const btnVoiceToggle = $('#btnVoiceToggle');
+const voiceToggleLabel = $('#voiceToggleLabel');
+if (btnVoiceToggle) {
+  btnVoiceToggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    unlockAudio();
+    if (continuousVoiceActive && !isVoicePaused) {
+      continuousVoiceActive = false;
+      isVoicePaused = true;
+      pauseContinuousVoice();
+      btnVoiceToggle.classList.remove('active');
+      if (voiceToggleLabel) voiceToggleLabel.textContent = 'Mic Paused — Tap to Speak';
+      toast('Microphone paused');
+    } else {
+      continuousVoiceActive = true;
+      isVoicePaused = false;
+      btnVoiceToggle.classList.add('active');
+      if (voiceToggleLabel) voiceToggleLabel.textContent = 'Hands-Free Mic Active';
+      startContinuousRecognition();
+      toast('Hands-free mic active');
+    }
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Core Tap: Animate core without cutting off speaking voice           */
 /* ------------------------------------------------------------------ */
@@ -1293,6 +1380,7 @@ function switchView(viewName) {
   }
   if (viewName === 'screen') {
     startLiveMirror();
+    refreshDesktopTabs();
   }
   if (viewName === 'brain') setTimeout(resizeCore, 40);
 }
@@ -1517,7 +1605,9 @@ function isMirrorModalOpen() {
 
 // Coordinate Normalization with 90-degree Inverse Transform Support
 function getNormalizedCoords(e, img, rotated) {
-  const container = maximizedContainer || img;
+  const isModal = isMirrorModalOpen();
+  const targetImg = img || (isModal ? maximizedScreenImg : pcScreenImg);
+  const container = (isModal && maximizedContainer) ? maximizedContainer : (targetImg || document.getElementById('screenWrapper'));
   if (!container) return null;
   const rect = container.getBoundingClientRect();
   if (!rect.width || !rect.height) return null;
@@ -1543,8 +1633,8 @@ function getNormalizedCoords(e, img, rotated) {
     localY = clientY - rect.top;
   }
 
-  const natW = img.naturalWidth || 1920;
-  const natH = img.naturalHeight || 1080;
+  const natW = targetImg ? (targetImg.naturalWidth || 1920) : 1920;
+  const natH = targetImg ? (targetImg.naturalHeight || 1080) : 1080;
   const naturalRatio = natW / natH;
   const boxRatio = boxW / boxH;
 
@@ -1575,11 +1665,17 @@ function getNormalizedCoords(e, img, rotated) {
 }
 
 function showTouchRipple(clientX, clientY) {
-  if (!touchFeedbackRipple) return;
-  touchFeedbackRipple.style.left = clientX + 'px';
-  touchFeedbackRipple.style.top = clientY + 'px';
-  touchFeedbackRipple.classList.add('show');
-  setTimeout(() => touchFeedbackRipple.classList.remove('show'), 240);
+  let ripple = document.getElementById('touchFeedbackRipple');
+  if (!ripple) {
+    ripple = document.createElement('div');
+    ripple.id = 'touchFeedbackRipple';
+    ripple.className = 'touch-feedback-ripple';
+    document.body.appendChild(ripple);
+  }
+  ripple.style.left = clientX + 'px';
+  ripple.style.top = clientY + 'px';
+  ripple.classList.add('show');
+  setTimeout(() => ripple.classList.remove('show'), 240);
 }
 
 // Position text selection toolbar
@@ -1599,14 +1695,20 @@ let isScrollRequestPending = false;
 let queuedScrollAmount = 0;
 let queuedScrollDirection = null;
 
-function sendScrollCommand(direction, amount) {
+function sendScrollCommand(direction, amount, normX, normY) {
   if (isScrollRequestPending) {
     queuedScrollDirection = direction;
     queuedScrollAmount += amount;
     return;
   }
   isScrollRequestPending = true;
-  postJSON('/api/screen/control', { action: 'scroll', direction, amount })
+  const payload = { action: 'scroll', direction, amount };
+  if (normX !== undefined && normY !== undefined && normX !== null && normY !== null) {
+    payload.x = normX;
+    payload.y = normY;
+    payload.normalized = true;
+  }
+  postJSON('/api/screen/control', payload)
     .catch(() => {})
     .finally(() => {
       isScrollRequestPending = false;
@@ -1615,7 +1717,7 @@ function sendScrollCommand(direction, amount) {
         const a = Math.min(8, queuedScrollAmount);
         queuedScrollAmount = 0;
         queuedScrollDirection = null;
-        sendScrollCommand(d, a);
+        sendScrollCommand(d, a, normX, normY);
       }
     });
 }
@@ -1799,19 +1901,429 @@ if (maximizedContainer) {
   }, { passive: false });
 }
 
-// Click on standard screen preview in non-maximized view
+// Touch gesture handler for inline (non-maximized) screen preview
+// Supports: tap-to-click, swipe-to-scroll, long-press-to-double-click
+// ===================================================================
+// Mobile Screen Touch Gestures, Zoom, Touch Dock & Virtual Keyboard
+// ===================================================================
+let inlineZoom = 1.0;
+let inlinePanX = 0, inlinePanY = 0;
+let inlineTouchDistance = 0;
+const zoomBadge = document.getElementById('zoomBadge');
+
+function updateInlineZoom() {
+  if (!pcScreenImg) return;
+  pcScreenImg.style.transform = `scale(${inlineZoom}) translate(${inlinePanX}px, ${inlinePanY}px)`;
+  if (zoomBadge) zoomBadge.textContent = `${inlineZoom.toFixed(1)}x`;
+}
+
+const btnZoomIn = document.getElementById('btnZoomIn');
+const btnZoomOut = document.getElementById('btnZoomOut');
+const btnZoomReset = document.getElementById('btnZoomReset');
+
+if (btnZoomIn) {
+  btnZoomIn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    inlineZoom = Math.min(3.0, inlineZoom + 0.25);
+    updateInlineZoom();
+  });
+}
+if (btnZoomOut) {
+  btnZoomOut.addEventListener('click', (e) => {
+    e.stopPropagation();
+    inlineZoom = Math.max(1.0, inlineZoom - 0.25);
+    if (inlineZoom === 1.0) { inlinePanX = 0; inlinePanY = 0; }
+    updateInlineZoom();
+  });
+}
+if (btnZoomReset) {
+  btnZoomReset.addEventListener('click', (e) => {
+    e.stopPropagation();
+    inlineZoom = 1.0; inlinePanX = 0; inlinePanY = 0;
+    updateInlineZoom();
+  });
+}
+
+// Touch gesture handler for inline screen preview
 if (pcScreenImg) {
+  let inlineTouchStartX = 0, inlineTouchStartY = 0;
+  let inlineLastTouchX = 0, inlineLastTouchY = 0;
+  let inlineTouchStartTime = 0;
+  let inlineIsScrollGesture = false;
+  let inlineScrollAccum = 0;
+  let inlineLongPressTimer = null;
+  let inlineLastTapTime = 0;
+
+  const screenWrapper = document.getElementById('screenWrapper');
+  const inlineTouchTarget = screenWrapper || pcScreenImg;
+
+  inlineTouchTarget.addEventListener('touchstart', (e) => {
+    if (!e.touches || !e.touches.length) return;
+    e.preventDefault();
+
+    // Two-finger pinch zoom
+    if (e.touches.length === 2) {
+      inlineTouchDistance = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      if (inlineLongPressTimer) clearTimeout(inlineLongPressTimer);
+      return;
+    }
+
+    const t = e.touches[0];
+    inlineTouchStartX = t.clientX;
+    inlineTouchStartY = t.clientY;
+    inlineLastTouchX = t.clientX;
+    inlineLastTouchY = t.clientY;
+    inlineTouchStartTime = Date.now();
+    inlineIsScrollGesture = false;
+    inlineScrollAccum = 0;
+
+    if (inlineLongPressTimer) clearTimeout(inlineLongPressTimer);
+    inlineLongPressTimer = setTimeout(() => {
+      if (!inlineIsScrollGesture) {
+        const coords = getNormalizedCoords({ clientX: inlineTouchStartX, clientY: inlineTouchStartY }, pcScreenImg, false);
+        if (coords) {
+          if (navigator.vibrate) navigator.vibrate([45]);
+          postJSON('/api/screen/control', { action: 'right_click', x: coords.x, y: coords.y, normalized: true }).catch(() => {});
+          showTouchRipple(inlineTouchStartX, inlineTouchStartY);
+          toast('Right clicked (context menu)');
+        }
+      }
+    }, 420);
+  }, { passive: false });
+
+  inlineTouchTarget.addEventListener('touchmove', (e) => {
+    if (!e.touches || !e.touches.length) return;
+    e.preventDefault();
+
+    // Pinch zoom handling
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      if (inlineTouchDistance > 0) {
+        const diff = dist - inlineTouchDistance;
+        if (Math.abs(diff) > 4) {
+          inlineZoom = Math.max(1.0, Math.min(3.0, inlineZoom + (diff > 0 ? 0.05 : -0.05)));
+          updateInlineZoom();
+          inlineTouchDistance = dist;
+        }
+      }
+      return;
+    }
+
+    const t = e.touches[0];
+    const deltaY = t.clientY - inlineLastTouchY;
+    const totalDist = Math.hypot(t.clientX - inlineTouchStartX, t.clientY - inlineTouchStartY);
+
+    if (totalDist > 8 && inlineLongPressTimer) {
+      clearTimeout(inlineLongPressTimer);
+      inlineLongPressTimer = null;
+    }
+
+    inlineLastTouchX = t.clientX;
+    inlineLastTouchY = t.clientY;
+
+    if (totalDist > 10) {
+      inlineIsScrollGesture = true;
+      inlineScrollAccum += deltaY;
+      if (Math.abs(inlineScrollAccum) >= 12) {
+        const direction = inlineScrollAccum < 0 ? 'down' : 'up';
+        const amount = Math.max(2, Math.min(6, Math.round(Math.abs(inlineScrollAccum) / 6)));
+        const coords = getNormalizedCoords({ clientX: inlineLastTouchX, clientY: inlineLastTouchY }, pcScreenImg, false);
+        sendScrollCommand(direction, amount, coords ? coords.x : 0.5, coords ? coords.y : 0.5);
+        inlineScrollAccum = 0;
+      }
+    }
+  }, { passive: false });
+
+  inlineTouchTarget.addEventListener('touchend', (e) => {
+    if (inlineLongPressTimer) {
+      clearTimeout(inlineLongPressTimer);
+      inlineLongPressTimer = null;
+    }
+
+    if (inlineIsScrollGesture) {
+      inlineIsScrollGesture = false;
+      return;
+    }
+
+    const elapsed = Date.now() - inlineTouchStartTime;
+    if (elapsed < 320) {
+      const coords = getNormalizedCoords({ clientX: inlineTouchStartX, clientY: inlineTouchStartY }, pcScreenImg, false);
+      if (coords) {
+        const now = Date.now();
+        const isDoubleTap = (now - inlineLastTapTime < 320);
+        inlineLastTapTime = now;
+        showTouchRipple(inlineTouchStartX, inlineTouchStartY);
+
+        if (isDoubleTap || currentClickMode === 'double') {
+          if (navigator.vibrate) navigator.vibrate([30, 40]);
+          postJSON('/api/screen/control', { action: 'click', clicks: 2, x: coords.x, y: coords.y, normalized: true }).catch(() => {});
+          toast('Double clicked');
+        } else if (currentClickMode === 'right') {
+          if (navigator.vibrate) navigator.vibrate([35]);
+          postJSON('/api/screen/control', { action: 'right_click', x: coords.x, y: coords.y, normalized: true }).catch(() => {});
+          toast('Right clicked');
+        } else {
+          if (navigator.vibrate) navigator.vibrate(25);
+          postJSON('/api/screen/control', { action: 'click', x: coords.x, y: coords.y, normalized: true }).catch(() => {});
+          toast('Clicked');
+        }
+      }
+    }
+  }, { passive: false });
+
+  // Desktop mouse click fallback
   pcScreenImg.addEventListener('click', async (e) => {
+    if (window.matchMedia('(pointer: coarse)').matches) return;
     const coords = getNormalizedCoords(e, pcScreenImg, false);
     if (!coords) return;
     showTouchRipple(coords.clientX, coords.clientY);
-    if (navigator.vibrate) navigator.vibrate(25);
+    const action = currentClickMode === 'right' ? 'right_click' : 'click';
+    const clicks = currentClickMode === 'double' ? 2 : 1;
     try {
-      await postJSON('/api/screen/control', { action: 'click', x: coords.x, y: coords.y, normalized: true });
-      toast('Clicked on PC');
+      await postJSON('/api/screen/control', { action, clicks, x: coords.x, y: coords.y, normalized: true });
+      toast(action === 'right_click' ? 'Right Click' : (clicks === 2 ? 'Double Click' : 'Clicked'));
     } catch(_) {}
   });
 }
+
+// Touch Dock buttons
+document.querySelectorAll('.touch-dock-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const action = btn.dataset.touchAction;
+    if (action === 'left_click') {
+      currentClickMode = 'left';
+      updateActiveDockBtn('btnTouchLeftClick');
+      toast('Left Click Mode active');
+    } else if (action === 'right_click') {
+      currentClickMode = 'right';
+      updateActiveDockBtn('btnTouchRightClick');
+      toast('Right Click Mode active — tap screen to right click');
+    } else if (action === 'double_click') {
+      currentClickMode = 'double';
+      updateActiveDockBtn('btnTouchDblClick');
+      toast('Double Click Mode active — tap screen to 2x click');
+    } else if (action === 'scroll_up') {
+      sendScrollCommand('up', 4, 0.5, 0.5);
+      if (navigator.vibrate) navigator.vibrate(20);
+    } else if (action === 'scroll_down') {
+      sendScrollCommand('down', 4, 0.5, 0.5);
+      if (navigator.vibrate) navigator.vibrate(20);
+    }
+  });
+});
+
+function updateActiveDockBtn(activeId) {
+  document.querySelectorAll('.touch-dock-btn[data-touch-action]').forEach(b => {
+    if (['btnTouchLeftClick', 'btnTouchRightClick', 'btnTouchDblClick'].includes(b.id)) {
+      b.classList.toggle('active', b.id === activeId);
+    }
+  });
+}
+
+// Virtual Keyboard Drawer
+const btnToggleVirtualKeyboard = document.getElementById('btnToggleVirtualKeyboard');
+const virtualKeyDrawer = document.getElementById('virtualKeyDrawer');
+const pcKeyboardInput = document.getElementById('pcKeyboardInput');
+const btnSendKeyText = document.getElementById('btnSendKeyText');
+
+if (btnToggleVirtualKeyboard && virtualKeyDrawer) {
+  btnToggleVirtualKeyboard.addEventListener('click', (e) => {
+    e.stopPropagation();
+    virtualKeyDrawer.hidden = !virtualKeyDrawer.hidden;
+    if (!virtualKeyDrawer.hidden && pcKeyboardInput) {
+      pcKeyboardInput.focus();
+    }
+  });
+}
+
+if (btnSendKeyText && pcKeyboardInput) {
+  const sendKeyText = () => {
+    const text = pcKeyboardInput.value.trim();
+    if (!text) return;
+    postJSON('/api/screen/control', { action: 'type', text, enter: true }).catch(() => {});
+    toast(`Sent: "${text}"`);
+    pcKeyboardInput.value = '';
+  };
+  btnSendKeyText.addEventListener('click', sendKeyText);
+  pcKeyboardInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      sendKeyText();
+    }
+  });
+}
+
+// Drawer Key Buttons
+document.querySelectorAll('.v-key').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const key = btn.dataset.key;
+    const cmd = btn.dataset.cmd;
+    if (key) {
+      postJSON('/api/screen/control', { action: 'key', key }).catch(() => {});
+      toast(`Pressed ${key.toUpperCase()}`);
+    } else if (cmd) {
+      const keys = cmd.toLowerCase().split('+');
+      postJSON('/api/screen/control', { action: 'hotkey', keys }).catch(() => {});
+      toast(`Sent ${cmd}`);
+    }
+  });
+});
+
+// Live Detected Tabs Ribbon
+const screenTabsRibbon = document.getElementById('screenTabsRibbon');
+let lastDesktopSummaryTime = 0;
+
+async function refreshDesktopTabs() {
+  if (!screenTabsRibbon) return;
+  const now = Date.now();
+  if (now - lastDesktopSummaryTime < 2500) return;
+  lastDesktopSummaryTime = now;
+
+  try {
+    const res = await fetchJSON('/api/desktop/summary');
+    if (!res || !res.ok) return;
+
+    screenTabsRibbon.innerHTML = '';
+
+    // Active App / Window
+    if (res.active_app) {
+      const appChip = document.createElement('button');
+      appChip.className = 'ribbon-tab-chip active';
+      appChip.innerHTML = `💻 <strong>${escapeHTML(res.active_app)}</strong>`;
+      appChip.title = res.active_window || '';
+      appChip.onclick = () => {
+        postJSON('/api/screen/control', { action: 'click', label: res.active_app }).catch(() => {});
+      };
+      screenTabsRibbon.appendChild(appChip);
+    }
+
+    // Top Menus (File, Edit, etc.)
+    if (Array.isArray(res.menus)) {
+      res.menus.forEach(m => {
+        const chip = document.createElement('button');
+        chip.className = 'ribbon-tab-chip chip-menu';
+        chip.innerHTML = `📁 ${escapeHTML(m.label)}`;
+        chip.onclick = () => {
+          postJSON('/api/screen/control', { action: 'click', label: m.label }).catch(() => {});
+          toast(`Clicked ${m.label} menu`);
+        };
+        screenTabsRibbon.appendChild(chip);
+      });
+    }
+
+    // Open Tabs
+    if (Array.isArray(res.tabs)) {
+      const seen = new Set();
+      res.tabs.forEach(t => {
+        if (!t.label || seen.has(t.label) || ['Minimize', 'Maximize', 'Close'].includes(t.label)) return;
+        seen.add(t.label);
+        const chip = document.createElement('button');
+        chip.className = 'ribbon-tab-chip';
+        chip.innerHTML = `📑 ${escapeHTML(t.label)}`;
+        chip.onclick = () => {
+          postJSON('/api/screen/control', { action: 'click', label: t.label }).catch(() => {});
+          toast(`Switched to tab: ${t.label}`);
+        };
+        screenTabsRibbon.appendChild(chip);
+      });
+    }
+
+    // Open background apps
+    if (Array.isArray(res.open_apps)) {
+      res.open_apps.forEach(a => {
+        const chip = document.createElement('button');
+        chip.className = 'ribbon-tab-chip chip-app';
+        chip.innerHTML = `🪟 ${escapeHTML(a.app || a.title)}`;
+        chip.onclick = () => {
+          postJSON('/api/screen/control', { action: 'switch', target: a.title }).catch(() => {});
+          toast(`Switched to ${a.app || a.title}`);
+        };
+        screenTabsRibbon.appendChild(chip);
+      });
+    }
+  } catch (_) {}
+}
+
+// Stream Mode Switcher (Turbo Frame vs Stream)
+const btnStreamMode = document.getElementById('btnStreamMode');
+let isTurboMode = false;
+let turboFrameInterval = null;
+
+function toggleStreamMode() {
+  isTurboMode = !isTurboMode;
+  if (btnStreamMode) {
+    btnStreamMode.textContent = isTurboMode ? '⚡ Turbo (On)' : '⚡ Turbo';
+    btnStreamMode.classList.toggle('active', isTurboMode);
+  }
+  if (isTurboMode) {
+    if (pcScreenImg) pcScreenImg.src = '';
+    startTurboFrameLoop();
+    toast('Turbo Frame Mode (10 FPS polling active)');
+  } else {
+    stopTurboFrameLoop();
+    if (pcScreenImg) pcScreenImg.src = `/api/screen/stream?t=${Date.now()}`;
+    toast('MJPEG Stream Mode active');
+  }
+}
+
+function startTurboFrameLoop() {
+  if (turboFrameInterval) return;
+  let isFetching = false;
+  turboFrameInterval = setInterval(async () => {
+    if (isFetching || isStreamPaused) return;
+    const isScreenActive = (currentView === 'screen') || isMirrorModalOpen();
+    if (!isScreenActive) return;
+
+    isFetching = true;
+    try {
+      const nextImg = new Image();
+      const t = Date.now();
+      nextImg.src = `/api/screen/frame?t=${t}`;
+      nextImg.onload = () => {
+        const target = isMirrorModalOpen() ? maximizedScreenImg : pcScreenImg;
+        if (target) target.src = nextImg.src;
+        isFetching = false;
+        const ph = document.getElementById('screenPlaceholder');
+        if (ph) ph.style.display = 'none';
+      };
+      nextImg.onerror = () => { isFetching = false; };
+    } catch (_) { isFetching = false; }
+  }, 100);
+}
+
+function stopTurboFrameLoop() {
+  if (turboFrameInterval) {
+    clearInterval(turboFrameInterval);
+    turboFrameInterval = null;
+  }
+}
+
+if (btnStreamMode) {
+  btnStreamMode.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleStreamMode();
+  });
+}
+
+// Suggestion prompt chips on Core View
+document.querySelectorAll('.core-chip').forEach(chip => {
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const cmd = chip.dataset.cmd;
+    if (cmd) {
+      if (navigator.vibrate) navigator.vibrate(25);
+      handleSpokenCommand(cmd);
+    }
+  });
+});
 
 // Desktop browser mouse click testing
 if (maximizedScreenImg) {

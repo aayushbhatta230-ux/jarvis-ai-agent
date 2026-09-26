@@ -699,52 +699,58 @@ class ActionPlanner:
             )
 
         # -------------------------------------------------------------- #
-        # Active application description
+        # Comprehensive Desktop & Tab Perception
         # -------------------------------------------------------------- #
+        try:
+            from perception.tabs import get_tabs_and_menus
+            tab_data = get_tabs_and_menus()
+            active_win = tab_data.get("active_window", "")
+            active_app = tab_data.get("active_app", "")
+            tabs_list = tab_data.get("tabs", [])
+            menus_list = tab_data.get("menus", [])
+            open_apps = tab_data.get("open_apps", [])
 
-        if (
-            app
-            and app.lower() != "desktop"
-            and title
-            and title.strip().lower()
-            != app.lower()
-        ):
-            lead = (
-                f"You're in {app} "
-                f"({title.strip()[:80]})"
+            parts = []
+            if active_app and active_win:
+                parts.append(f"You're currently in {active_app} on '{active_win}'.")
+            elif active_app:
+                parts.append(f"You're currently in {active_app}.")
+
+            # Extract distinct meaningful tabs
+            tab_names = []
+            for t in tabs_list:
+                name = t.get("label", "").strip()
+                if len(name) > 2 and name not in tab_names and name not in ("Minimize", "Maximize", "Close"):
+                    tab_names.append(name)
+
+            if tab_names:
+                shown_tabs = tab_names[:6]
+                parts.append(f"I see open tabs for: {', '.join(shown_tabs)}.")
+
+            if menus_list:
+                menu_names = [m.get("label") for m in menus_list[:6]]
+                parts.append(f"Top menus available: {', '.join(menu_names)}.")
+
+            if open_apps:
+                bg_apps = [a.get("app") or a.get("title") for a in open_apps[:3]]
+                parts.append(f"In the background, you have {', '.join(bg_apps)} open.")
+
+            parts.append("Just let me know if you want me to click on any tab, menu, or switch windows.")
+            natural_summary = " ".join(parts)
+
+            return ToolResult(
+                True,
+                "screen.question",
+                result=natural_summary,
             )
-
-        elif app:
-            lead = f"You're in {app}"
-
-        else:
-            lead = (
-                "I couldn't determine "
-                "the active application"
-            )
-
-        # -------------------------------------------------------------- #
-        # OCR result
-        # -------------------------------------------------------------- #
+        except Exception as exc:
+            print(f"[SCREEN QUESTION] tabs perception error: {exc}")
 
         if ocr_usable:
-            snippet = (
-                " ".join(ocr_text.split())
-                [:180]
-            )
-
-            message = (
-                f"{lead}. "
-                f"I can read text including: "
-                f"{snippet}."
-            )
-
+            snippet = " ".join(ocr_text.split())[:180]
+            message = f"{lead}. Visible text on screen includes: {snippet}."
         else:
-            message = (
-                f"{lead}, "
-                "but I couldn't reliably "
-                "read the text on screen."
-            )
+            message = f"{lead}."
 
         return ToolResult(
             True,

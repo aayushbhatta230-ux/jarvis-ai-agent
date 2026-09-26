@@ -72,4 +72,4 @@ def get_weather(location: str = "") -> str:
         loc_label = f"{name}, {country}" if country else name
         return f"Currently in {loc_label}: {temp}°C, {condition}, with winds at {wind} km/h."
     except Exception as exc:
-        return f"Unable to retrieve weather right now: {exc}"
+        return f"Unable to retrieve weather for {city} right now: {exc}"
