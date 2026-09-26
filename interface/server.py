@@ -233,6 +233,28 @@ class JarvisHandler(BaseHTTPRequestHandler):
 		if path == "/api/tts":
 			self._handle_tts(parsed.query)
 			return
+		if path == "/api/neural/status":
+			try:
+				from core.continuous_learning import get_continuous_learner
+				self._send_json(200, {"ok": True, **get_continuous_learner().get_report()})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+		if path == "/api/notes":
+			try:
+				from tools.smart_notes import get_notes_manager
+				notes = get_notes_manager().list_notes(limit=20)
+				self._send_json(200, {"ok": True, "notes": notes})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+		if path == "/api/system/diagnostics":
+			try:
+				from tools.system_diagnostics import get_system_diagnostics
+				self._send_json(200, {"ok": True, **get_system_diagnostics()})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
 		if path.startswith(("/api/", "/events")):
 			self._send_json(404, {"error": "unknown endpoint"})
 			return
@@ -770,6 +792,45 @@ class JarvisHandler(BaseHTTPRequestHandler):
 				self._send_json(200, {"ok": True, "message": "Permanent tunnel configuration saved and applied."})
 			except Exception as e:
 				self._send_json(500, {"ok": False, "error": str(e)})
+			return
+
+		if path == "/api/neural/train":
+			try:
+				from core.continuous_learning import get_continuous_learner
+				res = get_continuous_learner().run_consolidation_cycle()
+				self._send_json(200, {"ok": True, **res})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+
+		if path == "/api/neural/memorize":
+			body = _json_body(self) or {}
+			fact = (body.get("fact") or body.get("content") or "").strip()
+			category = body.get("category", "fact")
+			if not fact:
+				self._send_json(400, {"ok": False, "error": "missing fact or content"})
+				return
+			try:
+				from core.neural_memory import get_neural_memory
+				vid = get_neural_memory().store(fact, category=category, importance=1.2)
+				self._send_json(200, {"ok": True, "vector_id": vid, "message": "Memorized successfully."})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
+			return
+
+		if path == "/api/notes":
+			body = _json_body(self) or {}
+			content = (body.get("content") or "").strip()
+			title = (body.get("title") or "").strip() or None
+			if not content:
+				self._send_json(400, {"ok": False, "error": "missing content"})
+				return
+			try:
+				from tools.smart_notes import get_notes_manager
+				note = get_notes_manager().add_note(content, title=title)
+				self._send_json(200, {"ok": True, "note": note})
+			except Exception as exc:
+				self._send_json(500, {"ok": False, "error": str(exc)})
 			return
 
 		self._send_json(404, {"error": "unknown endpoint"})

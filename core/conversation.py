@@ -750,6 +750,11 @@ class ConversationManager:
 		print(f"[TURN {turn:03d}] RESPONSE: {response}")
 		self._append_context(f"Assistant: {response}")
 		self.history.append("assistant", response)
+		try:
+			from core.continuous_learning import get_continuous_learner
+			get_continuous_learner().consolidate_dialogue_turn(text, response)
+		except Exception:
+			pass
 		self._finish_request(request_id)
 		self._current_intent = None
 		self.set_state("idle")
@@ -1332,6 +1337,89 @@ class ConversationManager:
 			res = clean_system_cache()
 			self._emit_message("assistant", res["display"])
 			return res["spoken"]
+
+		# 4c. Deep System Diagnostics & Telemetry
+		diagnostics_kw = (
+			"system status", "system diagnostics", "system health", "pc health", "pc status",
+			"how is my pc", "how is my computer", "how's my pc", "how's my computer",
+			"battery status", "battery level", "cpu usage", "ram usage", "memory usage",
+			"hardware status", "system telemetry", "how much ram", "check battery",
+			"how much battery", "system load"
+		)
+		if any(k in lower_clean for k in diagnostics_kw):
+			from tools.system_diagnostics import get_system_diagnostics, format_diagnostics_speech
+			diag = get_system_diagnostics()
+			spoken = format_diagnostics_speech(diag)
+			display = (
+				f"📊 **System Telemetry**:\n"
+				f"- **CPU**: `{diag['cpu']['percent']}%` ({diag['cpu']['logical_cores']} cores)\n"
+				f"- **RAM**: `{diag['memory']['percent']}%` ({diag['memory']['used_gb']}GB / {diag['memory']['total_gb']}GB)\n"
+				f"- **Disk C:**: `{diag['disk']['percent']}%` ({diag['disk']['free_gb']}GB free)\n"
+				f"- **Battery**: `{diag['power']['battery_percent']}%` ({'Plugged in' if diag['power']['plugged_in'] else 'On Battery'})"
+			)
+			self._emit_message("assistant", display)
+			return spoken
+
+		# 4d. Smart Notes (Neural Vector Indexed)
+		if lower_clean.startswith(("take a note", "take note", "write a note", "write down note", "save a note", "save note", "new note")):
+			from tools.smart_notes import get_notes_manager
+			note_body = re.sub(r"^(?:take\s+(?:a\s+)?note|take\s+note|write\s+(?:a\s+)?note|write\s+down\s+note|save\s+(?:a\s+)?note|new\s+note)(?:\s+(?:that|to|about|called)?\s+)?", "", lower_clean).strip()
+			if note_body:
+				n = get_notes_manager().add_note(note_body)
+				display = f"📝 **Note Saved**: \"{n['content']}\""
+				self._emit_message("assistant", display)
+				return f"I've saved your note: {n['content']}."
+			else:
+				return "What note would you like me to save, sir?"
+
+		if any(lower_clean == p or lower_clean.startswith(f"{p} ") for p in ("show notes", "show my notes", "list notes", "my notes", "what are my notes")):
+			from tools.smart_notes import get_notes_manager
+			notes = get_notes_manager().list_notes(limit=4)
+			if not notes:
+				return "You don't have any notes saved yet, sir."
+			display_lines = ["📝 **Your Recent Notes**:"]
+			spoken_items = []
+			for idx, n in enumerate(notes, 1):
+				display_lines.append(f"{idx}. {n['content']}")
+				spoken_items.append(f"{idx}: {n['content']}")
+			self._emit_message("assistant", "\n".join(display_lines))
+			return f"You have {len(notes)} recent notes. " + "; ".join(spoken_items)
+
+		# 4e. Neural Memory & Knowledge Recall
+		memory_recall_phrases = (
+			"what do you remember", "recall memory", "what is in your memory",
+			"what do you know about me", "search memory", "recall what i told you",
+			"what are my preferences", "what is my project called"
+		)
+		if any(k in lower_clean for k in memory_recall_phrases):
+			from core.neural_memory import get_neural_memory
+			mem = get_neural_memory()
+			query_term = re.sub(r"^(?:jarvis\s+)?(?:what\s+do\s+you\s+remember(?:\s+about)?|what\s+do\s+you\s+know(?:\s+about)?|search\s+memory(?:\s+for)?|recall(?:\s+what\s+i\s+told\s+you\s+about)?)\s*", "", lower_clean).strip()
+			if not query_term:
+				query_term = "user preferences and project facts"
+			recalled = mem.search(query_term, top_k=4, min_score=0.08)
+			if not recalled:
+				return "I haven't stored any specific memories on that yet, sir."
+			items = [r["content"] for r in recalled]
+			display = "🧠 **Neural Memory Recall**:\n" + "\n".join(f"- {c}" for c in items)
+			self._emit_message("assistant", display)
+			return f"From my neural memory: " + "; ".join(items[:2])
+
+		# 4f. Neural Visual Grounding ("click [element] on screen", "find [element] on screen")
+		click_screen_match = re.search(r"^(?:click|tap|press)\s+(?:on\s+)?(?:the\s+)?(.+?)(?:\s+(?:button|tab|link|menu|icon))?(?:\s+on\s+(?:the\s+)?screen)?$", lower_clean)
+		if click_screen_match:
+			elem_name = click_screen_match.group(1).strip()
+			if elem_name and elem_name not in ("it", "that", "this", "here", "file", "app", "window"):
+				try:
+					from vision.neural_vision import get_vision_grounder
+					coord = get_vision_grounder().find_target(elem_name)
+					if coord:
+						cx, cy = coord
+						from tools.screen import click_at
+						click_at(cx, cy)
+						return f"Clicked on {elem_name} at screen coordinates ({cx}, {cy}), sir."
+				except Exception as ground_err:
+					print(f"[GROUNDING] Notice: {ground_err}")
 
 		# 5. Remote PC Operations: Power & Security
 		if any(k in lower_clean for k in ("lock pc", "lock computer", "lock screen", "lock laptop", "lock workstation")):

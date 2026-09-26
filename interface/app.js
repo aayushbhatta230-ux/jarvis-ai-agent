@@ -1498,6 +1498,109 @@ if (menuBtnSettings) menuBtnSettings.addEventListener('click', () => {
   if (settingsDrawer) { settingsDrawer.classList.add('open'); settingsDrawer.setAttribute('aria-hidden', 'false'); }
 });
 
+/* ------------------------------------------------------------------ */
+/* Neural Intelligence & Hardware Telemetry Modal                     */
+/* ------------------------------------------------------------------ */
+const menuBtnNeural = document.getElementById('menuBtnNeural');
+const neuralModal = document.getElementById('neuralModal');
+const closeNeuralModal = document.getElementById('closeNeuralModal');
+const dismissNeuralModal = document.getElementById('dismissNeuralModal');
+
+async function updateNeuralAndTelemetry() {
+  try {
+    const diag = await getJSON('/api/system/diagnostics');
+    if (diag && diag.ok !== false) {
+      const cpu = $('#telemCpu'); if (cpu) cpu.textContent = `${diag.cpu.percent}%`;
+      const cores = $('#telemCores'); if (cores) cores.textContent = `${diag.cpu.logical_cores} cores`;
+      const ram = $('#telemRam'); if (ram) ram.textContent = `${diag.memory.percent}%`;
+      const ramAvail = $('#telemRamAvail'); if (ramAvail) ramAvail.textContent = `${diag.memory.free_gb} GB free`;
+      const bat = $('#telemBattery'); if (bat) bat.textContent = `${diag.power.battery_percent}%`;
+      const pwr = $('#telemPower'); if (pwr) pwr.textContent = diag.power.plugged_in ? 'Plugged In' : 'On Battery';
+      const disk = $('#telemDisk'); if (disk) disk.textContent = `${diag.disk.percent}%`;
+      const diskFree = $('#telemDiskFree'); if (diskFree) diskFree.textContent = `${diag.disk.free_gb} GB free`;
+    }
+  } catch(e) {}
+
+  try {
+    const n = await getJSON('/api/neural/status');
+    if (n && n.ok !== false) {
+      const emb = $('#neuralEmbedder'); if (emb) emb.textContent = n.active_embedder || 'Neural Subword Projector';
+      const vecs = $('#neuralVectors'); if (vecs) vecs.textContent = n.neural_memory_vectors ?? 0;
+      const gpt = $('#neuralGpt'); if (gpt) gpt.textContent = `${n.gpt_provider} (${n.gpt_model})`;
+      const hab = $('#neuralHabits'); if (hab) hab.textContent = n.habits_indexed ?? 0;
+    }
+  } catch(e) {}
+}
+
+if (menuBtnNeural) {
+  menuBtnNeural.addEventListener('click', () => {
+    if (hudMenu) hudMenu.hidden = true;
+    if (neuralModal) {
+      neuralModal.hidden = false;
+      neuralModal.setAttribute('aria-hidden', 'false');
+      updateNeuralAndTelemetry();
+    }
+  });
+}
+
+const hideNeuralModal = () => {
+  if (neuralModal) {
+    neuralModal.hidden = true;
+    neuralModal.setAttribute('aria-hidden', 'true');
+  }
+};
+if (closeNeuralModal) closeNeuralModal.addEventListener('click', hideNeuralModal);
+if (dismissNeuralModal) dismissNeuralModal.addEventListener('click', hideNeuralModal);
+
+// Memorize action
+const btnMemorize = document.getElementById('btnMemorize');
+const memoInput = document.getElementById('memoInput');
+if (btnMemorize && memoInput) {
+  btnMemorize.addEventListener('click', async () => {
+    const text = memoInput.value.trim();
+    if (!text) return;
+    btnMemorize.disabled = true;
+    try {
+      const res = await postJSON('/api/neural/memorize', { fact: text });
+      if (res && res.ok) {
+        toast('Vector memory stored successfully.');
+        memoInput.value = '';
+        updateNeuralAndTelemetry();
+      } else {
+        toast('Could not store memory: ' + (res.error || 'unknown'), true);
+      }
+    } catch(err) {
+      toast('Memory failed: ' + err.message, true);
+    } finally {
+      btnMemorize.disabled = false;
+    }
+  });
+}
+
+// Training action
+const btnRunTraining = document.getElementById('btnRunTraining');
+const trainingStatus = document.getElementById('trainingStatus');
+if (btnRunTraining) {
+  btnRunTraining.addEventListener('click', async () => {
+    btnRunTraining.disabled = true;
+    if (trainingStatus) trainingStatus.textContent = 'Consolidating memories and optimizing neural vectors...';
+    try {
+      const res = await postJSON('/api/neural/train', {});
+      if (res && res.ok) {
+        if (trainingStatus) trainingStatus.textContent = `Cycle #${res.cycle} completed. Synthesized ${res.anchors_synthesized} neural anchors.`;
+        toast('Neural consolidation complete.');
+        updateNeuralAndTelemetry();
+      } else {
+        if (trainingStatus) trainingStatus.textContent = 'Training error: ' + (res.error || 'failed');
+      }
+    } catch(err) {
+      if (trainingStatus) trainingStatus.textContent = 'Training error: ' + err.message;
+    } finally {
+      btnRunTraining.disabled = false;
+    }
+  });
+}
+
 const btnBackFromChat = document.getElementById('btnBackFromChat');
 if (btnBackFromChat) btnBackFromChat.addEventListener('click', () => switchView('brain'));
 

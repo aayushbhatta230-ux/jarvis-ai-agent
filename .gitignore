@@ -25,6 +25,7 @@ memory/*.db
 memory/screenshots/
 database/*.db
 database/*.sqlite*
+database/*.json
 
 # Virtual Environments
 .venv/

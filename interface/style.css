@@ -1783,4 +1783,106 @@ body:has(#screenMaximizedModal[style*="display: flex"]) .bottom-nav-dock {
   }
 }
 
+/* ==================== NEURAL & TELEMETRY MODAL ==================== */
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.55rem;
+  margin: 0.6rem 0 1rem;
+}
+.telem-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.65rem 0.5rem;
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+.telem-label {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.telem-val {
+  display: block;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--cyan);
+  margin: 0.2rem 0;
+  font-family: var(--font-mono, monospace);
+  text-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
+}
+.telem-sub {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text);
+  opacity: 0.8;
+}
+
+.neural-section {
+  border-top: 1px solid var(--line);
+  padding-top: 0.85rem;
+  margin-top: 0.5rem;
+}
+.neural-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.6rem 0;
+}
+.stat-pill {
+  background: rgba(0, 229, 255, 0.06);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.74rem;
+  color: var(--text);
+}
+.stat-pill strong {
+  color: var(--cyan);
+}
+.memorize-box {
+  margin: 0.8rem 0;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem;
+}
+.memorize-box label {
+  font-size: 0.76rem;
+  color: var(--text);
+}
+.memo-row {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
+.memo-row input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  color: #fff;
+  font-size: 0.8rem;
+}
+.memo-row input:focus {
+  border-color: var(--cyan);
+  outline: none;
+}
+.training-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+.training-status-text {
+  font-size: 0.72rem;
+  color: var(--cyan);
+  min-height: 1rem;
+}
+
+
 

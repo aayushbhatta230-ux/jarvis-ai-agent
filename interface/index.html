@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="icon.png">
   <link rel="icon" type="image/png" href="icon.png">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css?v=2026.09.26.11">
+  <link rel="stylesheet" href="style.css?v=2026.09.27.01">
 </head>
 <body data-state="offline" data-theme="dark" data-view="brain">
   <audio id="phoneAudioPlayer" preload="auto" playsinline webkit-playsinline></audio>
@@ -80,6 +80,10 @@
       <button type="button" class="menu-item" id="menuBtnRemote">
         <span class="menu-icon">&#128241;</span>
         <span class="menu-text"><strong>Remote Access</strong><small>QR &amp; tunnel</small></span>
+      </button>
+      <button type="button" class="menu-item" id="menuBtnNeural">
+        <span class="menu-icon">&#129504;</span>
+        <span class="menu-text"><strong>Neural Intelligence</strong><small>Vector memory &amp; telemetry</small></span>
       </button>
       <button type="button" class="menu-item" id="menuBtnSettings">
         <span class="menu-icon">&#9881;&#65039;</span>
@@ -158,6 +162,11 @@
         <div class="messages" id="messages" role="log" aria-live="polite"></div>
 
         <div class="quick-chips" id="quickChips">
+          <button type="button" class="quick-chip" data-cmd="system diagnostics">&#128202; System Health</button>
+          <button type="button" class="quick-chip" data-cmd="clean cache">&#129529; Clean Cache</button>
+          <button type="button" class="quick-chip" data-cmd="what did i download recently">&#128229; Recent Downloads</button>
+          <button type="button" class="quick-chip" data-cmd="show my notes">&#128221; Notes</button>
+          <button type="button" class="quick-chip" data-cmd="what do you remember about me">&#129504; Neural Recall</button>
           <button type="button" class="quick-chip" data-cmd="files">&#128193; All Files</button>
           <button type="button" class="quick-chip" data-cmd="read test_dom.js">&#128196; test_dom.js</button>
           <button type="button" class="quick-chip" data-cmd="play lofi on youtube music">&#127925; YouTube Music</button>
@@ -582,6 +591,69 @@
     </div>
   </div>
 
+  <!-- NEURAL INTELLIGENCE & TELEMETRY MODAL -->
+  <div class="modal-overlay" id="neuralModal" aria-hidden="true" hidden>
+    <div class="modal neural-modal" role="dialog" aria-modal="true" aria-labelledby="neuralTitle">
+      <div class="modal-header-row">
+        <h2 id="neuralTitle">&#129504; Neural Core &amp; Telemetry</h2>
+        <button type="button" class="close-button" id="closeNeuralModal">&times;</button>
+      </div>
+      <p class="modal-subtitle">Real-time deep learning vector memory &amp; hardware health</p>
+
+      <!-- Hardware Telemetry Cards -->
+      <div class="telemetry-grid">
+        <div class="telem-card">
+          <span class="telem-label">CPU LOAD</span>
+          <strong class="telem-val" id="telemCpu">--%</strong>
+          <span class="telem-sub" id="telemCores">-- cores</span>
+        </div>
+        <div class="telem-card">
+          <span class="telem-label">RAM USED</span>
+          <strong class="telem-val" id="telemRam">--%</strong>
+          <span class="telem-sub" id="telemRamAvail">-- GB free</span>
+        </div>
+        <div class="telem-card">
+          <span class="telem-label">BATTERY</span>
+          <strong class="telem-val" id="telemBattery">--%</strong>
+          <span class="telem-sub" id="telemPower">--</span>
+        </div>
+        <div class="telem-card">
+          <span class="telem-label">STORAGE C:</span>
+          <strong class="telem-val" id="telemDisk">--%</strong>
+          <span class="telem-sub" id="telemDiskFree">-- GB free</span>
+        </div>
+      </div>
+
+      <!-- Neural Intelligence Section -->
+      <div class="neural-section">
+        <div class="method-badge">&#129504; DEEP LEARNING &amp; VECTOR RAG</div>
+        <div class="neural-stats-row">
+          <div class="stat-pill">Embedder: <strong id="neuralEmbedder">Local Neural Projector</strong></div>
+          <div class="stat-pill">Vectors: <strong id="neuralVectors">0</strong></div>
+          <div class="stat-pill">GPT Engine: <strong id="neuralGpt">Ollama LLaMA 3.2</strong></div>
+          <div class="stat-pill">Habits Learned: <strong id="neuralHabits">0</strong></div>
+        </div>
+        
+        <div class="memorize-box">
+          <label><strong>Memorize Fact or Preference:</strong></label>
+          <div class="memo-row">
+            <input type="text" id="memoInput" placeholder="e.g. My favorite editor is VS Code...">
+            <button type="button" class="btn-primary" id="btnMemorize">Store Vector</button>
+          </div>
+        </div>
+
+        <div class="training-row">
+          <button type="button" class="btn-secondary" id="btnRunTraining">&#9889; Run Neural Consolidation Cycle</button>
+          <span id="trainingStatus" class="training-status-text"></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" id="dismissNeuralModal">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- FULLSCREEN MAXIMIZED DESKTOP MIRROR -->
   <div class="maximized-screen-modal auto-landscape" id="screenMaximizedModal" hidden>
     <!-- Always-Visible Floating Exit Pill Button -->
@@ -675,7 +747,7 @@
   <span id="micLabel" style="display:none;">Mic idle</span>
   <span id="stateText" style="display:none;">JARVIS</span>
 
-  <script src="qr.js?v=2026.09.26.13"></script>
-  <script src="app.js?v=2026.09.26.13"></script>
+  <script src="qr.js?v=2026.09.27.01"></script>
+  <script src="app.js?v=2026.09.27.01"></script>
 </body>
 </html>
