@@ -162,8 +162,19 @@ class Brain:
                 history_parts.append(f"{role}: {content}")
             history_text = "\nRECENT CONVERSATION:\n" + "\n".join(history_parts) + "\n\n"
 
+        # Neural Vector Memory RAG augmentation
+        rag_text = ""
+        try:
+            from core.neural_memory import get_neural_memory
+            rag_text = get_neural_memory().get_rag_context(prompt, max_items=3)
+            if rag_text:
+                rag_text = f"\n{rag_text}\n"
+        except Exception:
+            pass
+
         return (
             f"{context}\n"
+            f"{rag_text}"
             f"{history_text}"
             f"USER: {prompt}\n"
             f"JARVIS:"
