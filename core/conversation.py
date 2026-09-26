@@ -14,7 +14,9 @@ utterance is captured from its start.
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 from collections.abc import Callable
 from queue import Queue
 from threading import Event, Lock, Thread
@@ -915,8 +917,8 @@ class ConversationManager:
 		"""Return True for knowledge, research, and multi-step reasoning tasks."""
 		lower = (text or "").lower().strip()
 
-		# Keep explicit browser/media/screen/volume navigation deterministic.
-		if any(w in lower for w in ("screen", "screenshot", "camera", "volume", "mute", "unmute")):
+		# Keep explicit browser/media/screen/volume/file navigation deterministic.
+		if any(w in lower for w in ("screen", "screenshot", "camera", "volume", "mute", "unmute", "download", "downloaded", "downloads", "my file", "my files", "folder", "directory")):
 			return False
 		computer_search_terms = (
 			"search youtube", "search youtube music", "search instagram",
@@ -1100,7 +1102,6 @@ class ConversationManager:
 				from vision.analyze import analyze_screen
 				from tools.computer import attach_desktop
 				from perception.window import get_active_window
-				from pathlib import Path
 				import time
 
 				attach_desktop()
@@ -1160,7 +1161,43 @@ class ConversationManager:
 				return f"I had an issue reading your screen: {exc}"
 
 
-		# 1c. File Listing & Workspace Intelligence
+		# 1c. Intelligent Downloads & Recent File Intelligence
+		download_markers = (
+			"downloaded file", "downloaded files", "recent download", "recent downloads",
+			"what did i download", "what'd i download", "look for download",
+			"look for downloads", "check downloads", "check my downloads",
+			"my downloads", "download folder", "downloads folder", "download files",
+			"show downloads", "show my downloads", "latest download", "latest downloads",
+			"recent downloaded", "download file"
+		)
+		is_download_query = any(m in lower_clean for m in download_markers) or (
+			"download" in lower_clean and any(w in lower_clean for w in ("recent", "latest", "what", "find", "look", "check", "show", "files", "file", "yesterday", "today", "week", "last"))
+		)
+		if is_download_query:
+			from tools.smart_files import get_recent_downloads
+			res = get_recent_downloads(limit=6)
+			if res.get("most_recent_path"):
+				self._last_file_reference = res["most_recent_path"]
+				self._conversation_context["last_file"] = res["most_recent_path"]
+			self._emit_message("assistant", res["display"])
+			return res["spoken"]
+
+		# Recent general files query
+		recent_file_markers = (
+			"recent file", "recent files", "recently modified", "recently active files",
+			"what was the recent file", "what was the latest file", "latest files",
+			"recent work", "what was i working on", "files i worked on"
+		)
+		if any(m in lower_clean for m in recent_file_markers):
+			from tools.smart_files import get_recent_user_files
+			res = get_recent_user_files(limit=6)
+			if res.get("most_recent_path"):
+				self._last_file_reference = res["most_recent_path"]
+				self._conversation_context["last_file"] = res["most_recent_path"]
+			self._emit_message("assistant", res["display"])
+			return res["spoken"]
+
+		# 1d. File Listing & Workspace Intelligence
 		list_files_phrases = (
 			"files", "list files", "show files", "show my files", "what files do i have",
 			"what are the files", "files on pc", "files in workspace", "workspace files",
@@ -1181,7 +1218,17 @@ class ConversationManager:
 			self._emit_message("assistant", res["display"])
 			return res["spoken"]
 
-		# 1d. Intelligent File Reading, Display & Brief Summary
+		# Contextual follow-up opening ("open it", "play it", "run it")
+		if lower_clean in ("open it", "play it", "open the file", "open that file", "open this file", "launch it", "run it"):
+			if self._last_file_reference and os.path.exists(self._last_file_reference):
+				try:
+					os.startfile(self._last_file_reference)
+					p = Path(self._last_file_reference)
+					return f"Opening {p.name} on your PC, sir."
+				except Exception as exc:
+					return f"I tried to open {self._last_file_reference}, but encountered: {exc}"
+
+		# 1e. Intelligent File Reading, Display & Brief Summary
 		file_read_kw = ("read", "open", "show me", "view", "display", "check", "inspect", "tell me what's in", "what is in", "what's inside", "what is inside", "contents of", "summarize", "cat")
 		has_file_ext = any(ext in lower_clean for ext in (".js", ".py", ".html", ".css", ".json", ".txt", ".md", ".ts", ".jsx", ".tsx", ".csv", ".xml", ".yaml", ".yml", ".sql", ".sh", ".bat"))
 		is_file_read_phrase = any(lower_clean.startswith(kw + " ") or f" {kw} " in lower_clean for kw in file_read_kw)
@@ -1278,6 +1325,13 @@ class ConversationManager:
 			from tools.remote_control import execute_remote_action
 			res = execute_remote_action("maximize_window")
 			return res.get("spoken", "Window maximized, sir.")
+
+		# 4b. System Maintenance: Clear Cache & Temporary Files
+		if any(k in lower_clean for k in ("clear cache", "clean cache", "clear temporary files", "clean temp", "free up space", "clear temp files")):
+			from tools.clean_cache import clean_system_cache
+			res = clean_system_cache()
+			self._emit_message("assistant", res["display"])
+			return res["spoken"]
 
 		# 5. Remote PC Operations: Power & Security
 		if any(k in lower_clean for k in ("lock pc", "lock computer", "lock screen", "lock laptop", "lock workstation")):
