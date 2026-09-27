@@ -519,7 +519,7 @@ class StreamingSpeechQueue {
     if (this.queue.length === 0) {
       this.isPlaying = false;
       this.currentText = '';
-      if (app.state === 'speaking') {
+      if (app.state === 'speaking' || app.state === 'processing') {
         setBodyState('listening');
         updateStatusCaption('Listening continuously…');
       }
@@ -568,8 +568,9 @@ class StreamingSpeechQueue {
     if ('speechSynthesis' in window) {
       try { window.speechSynthesis.cancel(); } catch (_) {}
     }
-    if (app.state === 'speaking') {
+    if (app.state === 'speaking' || app.state === 'processing') {
       setBodyState('listening');
+      updateStatusCaption('Listening continuously…');
     }
   }
 }
@@ -579,6 +580,7 @@ const streamingTTS = new StreamingSpeechQueue();
 function speakOnPhone(text) {
   if (!app.phoneAudio) {
     if (app.state === 'speaking' || app.state === 'processing') setBodyState('listening');
+    updateStatusCaption('Listening continuously…');
     resumeContinuousVoice();
     return;
   }
@@ -591,6 +593,7 @@ function speakOnPhone(text) {
   clean = clean.replace(/[*_#`📁🤖⚠️💻🎥]/g, '').trim();
   if (!clean) {
     if (app.state === 'speaking' || app.state === 'processing') setBodyState('listening');
+    updateStatusCaption('Listening continuously…');
     resumeContinuousVoice();
     return;
   }
@@ -599,6 +602,11 @@ function speakOnPhone(text) {
   const norm = clean.toLowerCase().replace(/[^a-z0-9]/g, '');
   const now = Date.now();
   if (norm && norm === lastSpokenPhoneText && (now - lastSpokenPhoneTime < 3000)) {
+    if (app.state === 'speaking' || app.state === 'processing') {
+      setBodyState('listening');
+      updateStatusCaption('Listening continuously…');
+    }
+    resumeContinuousVoice();
     return;
   }
   lastSpokenPhoneText = norm;
@@ -633,7 +641,8 @@ function fallbackSpeechSynthesis(clean, onFinishCallback) {
       finished = true;
       if (onFinishCallback) onFinishCallback();
       else {
-        if (app.state === 'speaking') setBodyState('listening');
+        if (app.state === 'speaking' || app.state === 'processing') setBodyState('listening');
+        updateStatusCaption('Listening continuously…');
         setTimeout(resumeContinuousVoice, 100);
       }
     };
@@ -857,6 +866,19 @@ async function sendCommand(text, source = 'text') {
   isVoicePaused = true;
   pauseContinuousVoice();
 
+  // Watchdog: If for any reason JARVIS stays in 'processing' or 'understanding'
+  // for more than 6.5s without speech, auto-recover to listening.
+  clearTimeout(sendCommand._watchdog);
+  sendCommand._watchdog = setTimeout(() => {
+    if (app.state === 'processing' || app.state === 'understanding' || app.state === 'speaking') {
+      console.log('[WATCHDOG] Auto-recovering from stuck state:', app.state);
+      setBodyState('listening');
+      updateStatusCaption('Listening continuously…');
+      isVoicePaused = false;
+      resumeContinuousVoice();
+    }
+  }, 6500);
+
   try {
     // When SSE is connected, fire-and-forget (SSE delivers the response).
     // When SSE is down, use synchronous wait as fallback.
@@ -864,29 +886,28 @@ async function sendCommand(text, source = 'text') {
     const res = await postJSON('/api/command', { text: clean, source, wait: shouldWait });
 
     if (shouldWait && res && res.response) {
+      clearTimeout(sendCommand._watchdog);
       const respText = res.response.trim();
       addMessage('assistant', respText);
       showCoreResponse(respText);
       speakOnPhone(respText);
-    }
-
-    // Don't force state to listening here — SSE state events will do it.
-    // Only set if SSE is disconnected.
-    if (shouldWait) {
       setBodyState('listening');
       updateStatusCaption('Listening continuously…');
     }
   } catch(e) {
     console.warn('Command dispatch error:', e);
+    clearTimeout(sendCommand._watchdog);
     toast('JARVIS not responding.', true);
     setBodyState('listening');
     updateStatusCaption('Listening continuously…');
   }
 
-  // Always resume voice after a short delay
+  // Always re-check voice state shortly
   setTimeout(() => {
     isVoicePaused = false;
-    resumeContinuousVoice();
+    if (app.state !== 'speaking' && app.state !== 'processing' && app.state !== 'understanding') {
+      resumeContinuousVoice();
+    }
   }, 800);
 }
 
@@ -1321,8 +1342,19 @@ async function submitVADUtterance(inRate) {
   setBodyState('processing');
   isVoicePaused = true;
 
+  clearTimeout(submitVADUtterance._watchdog);
+  submitVADUtterance._watchdog = setTimeout(() => {
+    if (app.state === 'processing') {
+      isVoicePaused = false;
+      setBodyState('listening');
+      updateStatusCaption('Listening continuously…');
+      resumeContinuousVoice();
+    }
+  }, 5000);
+
   const reader = new FileReader();
   reader.onload = async () => {
+    clearTimeout(submitVADUtterance._watchdog);
     const base64 = reader.result.split(',')[1];
     try {
       const res = await postJSON('/api/voice', { audio: base64, mime: 'audio/wav' });

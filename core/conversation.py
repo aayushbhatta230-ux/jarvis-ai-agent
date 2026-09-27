@@ -298,7 +298,13 @@ class ConversationManager:
 		with self.request_lock:
 			self.completed_request_ids.add(request_id)
 			if request_id == self.active_request_id:
-				self.active_request_id = None# ------------------------------------------------------------------ #
+				self.active_request_id = None
+		if self.state in ("speaking", "processing", "understanding", "executing", "planning"):
+			self.set_state("listening" if self.auto_listen else "idle")
+		if self.auto_listen and not self._is_remote_turn():
+			self._arm_listening()
+
+	# ------------------------------------------------------------------ #
 	# Worker loop + listening management
 	# ------------------------------------------------------------------ #
 
@@ -781,7 +787,9 @@ class ConversationManager:
 			pass
 		self._finish_request(request_id)
 		self._current_intent = None
-		self.set_state("idle")
+		self.set_state("listening" if self.auto_listen else "idle")
+		if self.auto_listen and not self._is_remote_turn():
+			self._arm_listening()
 
 	def _speak_plain(self, text: str) -> None:
 		"""Speak without a barge-in monitor (used for errors/notices)."""
