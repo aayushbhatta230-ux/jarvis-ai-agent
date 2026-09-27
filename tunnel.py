@@ -40,12 +40,16 @@ PERMANENT_URL_FILE = CONFIG_DIR / "permanent_url.txt"
 NGROK_DOMAIN_FILE = CONFIG_DIR / "ngrok_domain.txt"
 ENDPOINT_JSON_FILE = DOCS_DIR / "endpoint.json"
 GATEWAY_HTML_FILE = DOCS_DIR / "index.html"
+ROOT_ENDPOINT_FILE = PROJECT_ROOT / "endpoint.json"
+ROOT_HTML_FILE = PROJECT_ROOT / "index.html"
+NOJEKYLL_FILE = PROJECT_ROOT / ".nojekyll"
 
 _tunnel_url: str | None = None
 _tunnel_process: subprocess.Popen | None = None
 _active_port: int = 8765
 _lock = threading.Lock()
 _running: bool = False
+_watchdog_active: bool = False
 
 
 def get_tunnel_url() -> str | None:
@@ -159,8 +163,8 @@ def _is_cloudflared_running() -> bool:
         return False
 
 
-def _check_tunnel_alive(url: str, timeout: float = 2.5) -> bool:
-    """Verify if the tunnel URL is reachable over the public internet."""
+def _check_tunnel_alive(url: str, timeout: float = 3.5) -> bool:
+    """Verify if the tunnel URL is reachable over the public internet and healthy."""
     if not url or not url.startswith("https://"):
         return False
     if "api.trycloudflare.com" in url or "loca.lt" in url:
@@ -172,57 +176,66 @@ def _check_tunnel_alive(url: str, timeout: float = 2.5) -> bool:
             headers={"User-Agent": "JARVIS-HealthCheck/1.0"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status in (200, 204, 301, 302, 404, 502)
-    except Exception:
-        try:
-            req = urllib.request.Request(
-                url.rstrip("/"),
-                headers={"User-Agent": "JARVIS-HealthCheck/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.status in (200, 204, 301, 302, 404, 502)
-        except Exception:
+            if resp.status == 200:
+                data = resp.read(256).decode("utf-8", errors="ignore")
+                return "state" in data
             return False
+    except Exception:
+        return False
 
 
 def _sync_gateway(tunnel_url: str) -> None:
-    """Synchronize live tunnel URL to docs/endpoint.json and git portal."""
+    """Synchronize live tunnel URL to root and docs endpoint.json and push to GitHub Pages."""
     if not tunnel_url or "api.trycloudflare.com" in tunnel_url:
         return
     try:
         DOCS_DIR.mkdir(parents=True, exist_ok=True)
         endpoint_data = {
             "tunnel_url": tunnel_url,
+            "permanent_portal": "https://aayushbhatta230-ux.github.io/jarvis-ai-agent/",
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "status": "online",
         }
-        ENDPOINT_JSON_FILE.write_text(json.dumps(endpoint_data, indent=2), encoding="utf-8")
+        json_str = json.dumps(endpoint_data, indent=2)
+        ENDPOINT_JSON_FILE.write_text(json_str, encoding="utf-8")
+        ROOT_ENDPOINT_FILE.write_text(json_str, encoding="utf-8")
+        if not NOJEKYLL_FILE.exists():
+            NOJEKYLL_FILE.write_text("# Disable Jekyll\n", encoding="utf-8")
 
-        if GATEWAY_HTML_FILE.is_file():
-            html_content = GATEWAY_HTML_FILE.read_text(encoding="utf-8")
-            updated_html = re.sub(
-                r'let targetUrl = "[^"]+"',
-                f'let targetUrl = "{tunnel_url}"',
-                html_content,
-            )
-            updated_html = re.sub(
-                r'href="https://[^"]+\.trycloudflare\.com"',
-                f'href="{tunnel_url}"',
-                updated_html,
-            )
-            if updated_html != html_content:
-                GATEWAY_HTML_FILE.write_text(updated_html, encoding="utf-8")
+        for html_file in (GATEWAY_HTML_FILE, ROOT_HTML_FILE):
+            if html_file.is_file():
+                try:
+                    html_content = html_file.read_text(encoding="utf-8")
+                    updated_html = re.sub(
+                        r'let activeUrl = "[^"]+"',
+                        f'let activeUrl = "{tunnel_url}"',
+                        html_content,
+                    )
+                    updated_html = re.sub(
+                        r'let targetUrl = "[^"]+"',
+                        f'let targetUrl = "{tunnel_url}"',
+                        updated_html,
+                    )
+                    updated_html = re.sub(
+                        r'href="https://[^"]+\.trycloudflare\.com"',
+                        f'href="{tunnel_url}"',
+                        updated_html,
+                    )
+                    if updated_html != html_content:
+                        html_file.write_text(updated_html, encoding="utf-8")
+                except Exception:
+                    pass
 
         def _git_push():
             try:
                 subprocess.run(
-                    ["git", "add", "docs/endpoint.json", "docs/index.html"],
+                    ["git", "add", "docs/endpoint.json", "docs/index.html", "endpoint.json", "index.html", ".nojekyll", "config/"],
                     cwd=str(PROJECT_ROOT),
                     capture_output=True,
                     timeout=5,
                 )
                 subprocess.run(
-                    ["git", "commit", "-m", "Auto-sync tunnel gateway endpoint [skip ci]"],
+                    ["git", "commit", "-m", "chore(gateway): auto-sync live tunnel endpoint [skip ci]"],
                     cwd=str(PROJECT_ROOT),
                     capture_output=True,
                     timeout=5,
@@ -232,6 +245,30 @@ def _sync_gateway(tunnel_url: str) -> None:
                     cwd=str(PROJECT_ROOT),
                     capture_output=True,
                     timeout=10,
+                )
+                subprocess.run(
+                    ["git", "checkout", "gh-pages"],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    timeout=5,
+                )
+                subprocess.run(
+                    ["git", "merge", "main", "--no-edit"],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    timeout=5,
+                )
+                subprocess.run(
+                    ["git", "push", "origin", "gh-pages"],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    timeout=10,
+                )
+                subprocess.run(
+                    ["git", "checkout", "main"],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    timeout=5,
                 )
             except Exception:
                 pass
@@ -337,6 +374,13 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
                     line = line.strip()
                     if not line:
                         continue
+                    if "Unauthorized: Tunnel not found" in line or "Register tunnel error" in line:
+                        print("[TUNNEL] Quick tunnel lease expired on Cloudflare edge (Error 1016 prevented). Auto-recovering...")
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        break
                     match = url_pattern.search(line)
                     if match:
                         url = match.group(0)
@@ -419,6 +463,45 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
                 time.sleep(3)
             return
 
+    def _start_tunnel_watchdog():
+        """Continuously monitors tunnel health and auto-recovers from Error 1016 / edge disconnects."""
+        global _watchdog_active
+        with _lock:
+            if _watchdog_active:
+                return
+            _watchdog_active = True
+
+        def _watchdog_loop():
+            consecutive_failures = 0
+            while _running:
+                time.sleep(20)
+                url = get_tunnel_url()
+                if not url or "trycloudflare.com" not in url:
+                    continue
+
+                alive = _check_tunnel_alive(url, timeout=3.5)
+                if alive:
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= 2:
+                        print(f"[TUNNEL WATCHDOG] Tunnel health check failed ({consecutive_failures}/2, Error 1016/Origin DNS). Auto-recovering...")
+                        consecutive_failures = 0
+                        with _lock:
+                            proc = _tunnel_process
+                        if proc is not None:
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                try:
+                                    proc.kill()
+                                except Exception:
+                                    pass
+                        _kill_existing_tunnels()
+
+        threading.Thread(target=_watchdog_loop, name="jarvis-tunnel-watchdog", daemon=True).start()
+
+    _start_tunnel_watchdog()
     thread = threading.Thread(target=_run, name="jarvis-tunnel", daemon=True)
     thread.start()
     return thread
