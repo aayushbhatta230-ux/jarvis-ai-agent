@@ -3,202 +3,401 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#030408">
+  <meta name="theme-color" content="#050310">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="JARVIS">
-  <meta name="description" content="JARVIS Permanent Neural Gateway - Autonomous Local-First Computer Companion">
-  <title>JARVIS &mdash; Neural Quantum Gateway</title>
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="description" content="JARVIS — Personal AI Command Gateway. Permanent secure relay to your PC companion.">
+  <title>JARVIS &mdash; Gateway</title>
+  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/interface/icon.png">
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/interface/icon.png">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    body {
-      background: radial-gradient(circle at 50% 30%, #07101f 0%, #030408 100%);
-      color: #e0f7fa;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      text-align: center;
-      overflow-x: hidden;
-      position: relative;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    :root {
+      --bg-deep: #050310;
+      --bg-surface: rgba(12, 10, 28, 0.65);
+      --cyan: #00e5ff;
+      --violet: #a78bfa;
+      --text: #f0edff;
+      --muted: #9b95b8;
+      --success: #4ade80;
+      --danger: #ff6b7d;
+      --glow-cyan: rgba(0, 229, 255, 0.35);
+      --glow-violet: rgba(167, 139, 250, 0.2);
     }
-    .grid-bg {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-size: 36px 36px;
-      background-image: 
-        linear-gradient(to right, rgba(0, 229, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(0, 229, 255, 0.03) 1px, transparent 1px);
-      pointer-events: none;
-      z-index: 0;
-    }
-    .container {
-      position: relative;
-      z-index: 1;
-      max-width: 440px;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .hud-sphere {
-      position: relative;
-      width: 110px;
-      height: 110px;
-      margin-bottom: 28px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .ring-outer {
-      position: absolute;
-      width: 100%;
+
+    html, body {
       height: 100%;
-      border: 2px dashed rgba(0, 229, 255, 0.35);
-      border-radius: 50%;
-      animation: rotateRing 14s linear infinite;
+      overflow: hidden;
     }
-    .ring-inner {
-      position: absolute;
-      width: 82%;
-      height: 82%;
-      border: 2px solid transparent;
-      border-top-color: #00e5ff;
-      border-right-color: #00b0ff;
-      border-radius: 50%;
-      animation: spinInner 1.4s cubic-bezier(0.5, 0, 0.5, 1) infinite;
-      box-shadow: 0 0 24px rgba(0, 229, 255, 0.45);
-    }
-    .core-dot {
-      width: 22px;
-      height: 22px;
-      background: radial-gradient(circle, #ffffff 0%, #00e5ff 70%);
-      border-radius: 50%;
-      box-shadow: 0 0 20px #00e5ff;
-      animation: pulseGlow 1.8s ease-in-out infinite alternate;
-    }
-    @keyframes spinInner { to { transform: rotate(360deg); } }
-    @keyframes rotateRing { to { transform: rotate(-360deg); } }
-    @keyframes pulseGlow {
-      from { transform: scale(0.9); opacity: 0.8; }
-      to { transform: scale(1.15); opacity: 1.0; }
-    }
-    .brand-badge {
-      font-size: 0.72rem;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      color: #00e5ff;
-      background: rgba(0, 229, 255, 0.1);
-      border: 1px solid rgba(0, 229, 255, 0.25);
-      padding: 5px 14px;
-      border-radius: 20px;
-      margin-bottom: 12px;
-    }
-    h1 {
-      font-size: 1.65rem;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      color: #ffffff;
-      margin-bottom: 8px;
-      text-shadow: 0 0 20px rgba(0, 229, 255, 0.4);
-    }
-    .status-msg {
-      font-size: 0.95rem;
-      color: #80deea;
-      margin-bottom: 24px;
-      min-height: 24px;
-    }
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      font-size: 0.82rem;
-      color: #4ade80;
-      background: rgba(74, 222, 128, 0.1);
-      border: 1px solid rgba(74, 222, 128, 0.25);
-      padding: 4px 12px;
-      border-radius: 12px;
-      margin-bottom: 28px;
-    }
-    .status-badge i {
-      width: 7px;
-      height: 7px;
-      background: #4ade80;
-      border-radius: 50%;
-      box-shadow: 0 0 8px #4ade80;
-    }
-    .btn-connect {
-      display: inline-flex;
+
+    body {
+      background: var(--bg-deep);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      padding: max(24px, env(safe-area-inset-top, 24px)) 24px max(24px, env(safe-area-inset-bottom, 24px));
+      text-align: center;
+      -webkit-font-smoothing: antialiased;
+      position: relative;
+    }
+
+    /* Ambient Background */
+    .ambient {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% 35%, rgba(88, 62, 190, 0.22) 0%, transparent 100%),
+        radial-gradient(ellipse 60% 40% at 75% 80%, rgba(0, 229, 255, 0.08) 0%, transparent 100%),
+        radial-gradient(ellipse 50% 60% at 20% 70%, rgba(88, 62, 190, 0.1) 0%, transparent 100%);
+    }
+
+    .grid-overlay {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.3;
+      background-image:
+        linear-gradient(rgba(139, 179, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(139, 179, 255, 0.03) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 0%, transparent 80%);
+      -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 0%, transparent 80%);
+    }
+
+    /* Main Container */
+    .gateway {
+      position: relative; z-index: 1;
+      width: 100%; max-width: 400px;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 0;
+    }
+
+    /* Arc Reactor Core */
+    .reactor {
+      position: relative;
+      width: 140px; height: 140px;
+      margin-bottom: 32px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .reactor-ring {
+      position: absolute; inset: 0;
+      border: 1.5px solid transparent;
+      border-radius: 50%;
+    }
+
+    .reactor-ring-1 {
+      border-color: rgba(0, 229, 255, 0.2);
+      animation: spin-cw 18s linear infinite;
+    }
+
+    .reactor-ring-2 {
+      inset: 12px;
+      border-top-color: var(--cyan);
+      border-right-color: rgba(0, 229, 255, 0.5);
+      box-shadow: 0 0 20px var(--glow-cyan);
+      animation: spin-ccw 3s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+    }
+
+    .reactor-ring-3 {
+      inset: 24px;
+      border-bottom-color: var(--violet);
+      border-left-color: rgba(167, 139, 250, 0.4);
+      animation: spin-cw 2.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+    }
+
+    .reactor-core {
+      width: 28px; height: 28px;
+      background: radial-gradient(circle, #fff 0%, var(--cyan) 60%, transparent 100%);
+      border-radius: 50%;
+      box-shadow: 0 0 24px var(--cyan), 0 0 48px var(--glow-cyan);
+      animation: core-breathe 2.4s ease-in-out infinite alternate;
+    }
+
+    .reactor-pulse {
+      position: absolute;
+      width: 60px; height: 60px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 229, 255, 0.15) 0%, transparent 70%);
+      animation: pulse-expand 2.8s ease-in-out infinite;
+    }
+
+    @keyframes spin-cw { to { transform: rotate(360deg); } }
+    @keyframes spin-ccw { to { transform: rotate(-360deg); } }
+    @keyframes core-breathe {
+      from { transform: scale(0.88); opacity: 0.75; box-shadow: 0 0 18px var(--cyan), 0 0 36px var(--glow-cyan); }
+      to { transform: scale(1.12); opacity: 1; box-shadow: 0 0 28px var(--cyan), 0 0 56px var(--glow-cyan); }
+    }
+    @keyframes pulse-expand {
+      0%, 100% { transform: scale(0.8); opacity: 0.6; }
+      50% { transform: scale(1.8); opacity: 0; }
+    }
+
+    /* Brand */
+    .brand-tag {
+      font-size: 0.62rem; font-weight: 700;
+      letter-spacing: 0.28em; text-transform: uppercase;
+      color: var(--cyan);
+      background: rgba(0, 229, 255, 0.08);
+      border: 1px solid rgba(0, 229, 255, 0.2);
+      padding: 5px 16px; border-radius: 999px;
+      margin-bottom: 14px;
+      backdrop-filter: blur(8px);
+    }
+
+    h1 {
+      font-size: 1.8rem; font-weight: 900;
+      letter-spacing: 0.06em;
+      color: #fff;
+      margin-bottom: 6px;
+      text-shadow: 0 0 30px var(--glow-cyan);
+      line-height: 1.1;
+    }
+
+    .subtitle {
+      font-size: 0.88rem; font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 28px;
+      line-height: 1.4;
+    }
+
+    /* Status Card */
+    .status-card {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .status-indicator {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: all 0.4s ease;
+    }
+
+    .status-indicator.online {
+      background: var(--success);
+      box-shadow: 0 0 10px var(--success), 0 0 20px rgba(74, 222, 128, 0.3);
+      animation: dot-pulse 1.6s ease-in-out infinite;
+    }
+
+    .status-indicator.connecting {
+      background: #facc15;
+      box-shadow: 0 0 10px #facc15;
+      animation: dot-pulse 0.8s ease-in-out infinite;
+    }
+
+    .status-indicator.offline {
+      background: var(--danger);
+      box-shadow: 0 0 8px var(--danger);
+    }
+
+    @keyframes dot-pulse {
+      0%, 100% { opacity: 0.6; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.15); }
+    }
+
+    .status-text {
+      flex: 1;
+      text-align: left;
+    }
+
+    .status-label {
+      font-size: 0.78rem; font-weight: 700;
+      color: var(--text);
+      line-height: 1.3;
+    }
+
+    .status-detail {
+      font-size: 0.68rem; font-weight: 500;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* Connect Button */
+    .btn-launch {
+      display: flex; align-items: center; justify-content: center;
       gap: 10px;
       width: 100%;
-      max-width: 320px;
-      background: linear-gradient(135deg, #00b0ff, #00e5ff);
-      color: #020c15;
-      font-weight: 700;
-      font-size: 1.05rem;
+      background: linear-gradient(135deg, #6d28d9, #2563eb, #0891b2);
+      background-size: 200% 200%;
+      animation: gradient-shift 4s ease infinite;
+      color: #fff;
+      font-weight: 800; font-size: 1rem;
+      letter-spacing: 0.03em;
       padding: 16px 28px;
-      border-radius: 16px;
+      border-radius: 14px;
       text-decoration: none;
-      box-shadow: 0 8px 30px rgba(0, 229, 255, 0.35);
+      border: none; cursor: pointer;
+      box-shadow: 0 8px 28px rgba(99, 102, 241, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
       transition: all 0.2s ease;
-      border: none;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-launch::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, transparent 40%, rgba(255, 255, 255, 0.12) 50%, transparent 60%);
+      background-size: 300% 300%;
+      animation: shimmer 3s linear infinite;
+    }
+
+    .btn-launch:active {
+      transform: scale(0.97);
+      box-shadow: 0 4px 16px rgba(99, 102, 241, 0.5);
+    }
+
+    @keyframes gradient-shift {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 50%; }
+      100% { background-position: -100% 50%; }
+    }
+
+    .btn-launch .btn-icon {
+      font-size: 1.15em;
+    }
+
+    /* Retry Button */
+    .btn-retry {
+      display: none;
+      margin-top: 12px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: var(--muted);
+      font-size: 0.82rem; font-weight: 600;
+      padding: 10px 22px;
+      border-radius: 10px;
       cursor: pointer;
+      transition: all 0.2s;
     }
-    .btn-connect:hover { transform: translateY(-2px); box-shadow: 0 12px 36px rgba(0, 229, 255, 0.5); }
-    .btn-connect:active { transform: scale(0.98); }
-    .hint-box {
-      margin-top: 36px;
-      font-size: 0.78rem;
-      color: rgba(128, 222, 234, 0.65);
-      line-height: 1.5;
-      max-width: 340px;
-      border-top: 1px solid rgba(0, 229, 255, 0.12);
+
+    .btn-retry:active {
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--text);
+    }
+
+    /* Info Footer */
+    .footer-info {
+      margin-top: 32px;
       padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      width: 100%;
     }
-    .hint-box b { color: #80deea; }
+
+    .footer-tip {
+      font-size: 0.72rem; font-weight: 500;
+      color: rgba(155, 149, 184, 0.7);
+      line-height: 1.6;
+    }
+
+    .footer-tip strong {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .footer-version {
+      font-size: 0.6rem; font-weight: 600;
+      color: rgba(155, 149, 184, 0.35);
+      margin-top: 12px;
+      letter-spacing: 0.1em;
+    }
+
+    /* Loading spinner on button */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin-cw 0.6s linear infinite;
+      display: none;
+    }
+
+    .btn-launch.loading .spinner { display: block; }
+    .btn-launch.loading .btn-text { opacity: 0.7; }
   </style>
 </head>
 <body>
-  <div class="grid-bg"></div>
-  <div class="container">
-    <div class="hud-sphere">
-      <div class="ring-outer"></div>
-      <div class="ring-inner"></div>
-      <div class="core-dot"></div>
+  <div class="ambient"></div>
+  <div class="grid-overlay"></div>
+
+  <div class="gateway">
+    <div class="reactor">
+      <div class="reactor-ring reactor-ring-1"></div>
+      <div class="reactor-ring reactor-ring-2"></div>
+      <div class="reactor-ring reactor-ring-3"></div>
+      <div class="reactor-pulse"></div>
+      <div class="reactor-core"></div>
     </div>
 
-    <div class="brand-badge">Autonomous Neural Core</div>
-    <h1>JARVIS GATEWAY</h1>
-    <p class="status-msg" id="statusMsg">Synchronizing with your personal PC...</p>
-    
-    <div class="status-badge" id="statusBadge">
-      <i></i><span>Live Quantum Relay Active</span>
+    <div class="brand-tag">Neural Quantum Gateway</div>
+    <h1>JARVIS</h1>
+    <p class="subtitle" id="subtitle">Establishing secure relay to your PC&hellip;</p>
+
+    <div class="status-card" id="statusCard">
+      <div class="status-indicator connecting" id="statusDot"></div>
+      <div class="status-text">
+        <div class="status-label" id="statusLabel">Resolving endpoint&hellip;</div>
+        <div class="status-detail" id="statusDetail">Checking tunnel health</div>
+      </div>
     </div>
 
-    <a class="btn-connect" id="directLink" href="https://moisture-stadium-subsequently-trainer.trycloudflare.com">
-      <span>&#9889;</span> Launch JARVIS Core
+    <a class="btn-launch loading" id="launchBtn" href="#">
+      <div class="spinner"></div>
+      <span class="btn-icon">&#9889;</span>
+      <span class="btn-text">Launch JARVIS Core</span>
     </a>
 
-    <div class="hint-box">
-      <b>Permanent Link for iPhone &amp; Safari:</b><br>
-      Bookmark this exact URL or tap <b>Share &rarr; Add to Home Screen</b>.<br>
-      This gateway automatically resolves the live backend tunnel without changing domains.
+    <button class="btn-retry" id="retryBtn" type="button">&#8635; Retry Connection</button>
+
+    <div class="footer-info">
+      <p class="footer-tip">
+        <strong>&#128274; Permanent Safari Bookmark:</strong><br>
+        Tap <strong>Share &rarr; Add to Home Screen</strong> to pin JARVIS.<br>
+        This gateway auto-resolves the live tunnel URL.
+      </p>
+      <p class="footer-version">JARVIS GATEWAY v2.0</p>
     </div>
   </div>
 
   <script>
-    let activeUrl = "https://moisture-stadium-subsequently-trainer.trycloudflare.com";
-    const statusMsg = document.getElementById("statusMsg");
-    const directLink = document.getElementById("directLink");
+    const subtitle = document.getElementById('subtitle');
+    const statusDot = document.getElementById('statusDot');
+    const statusLabel = document.getElementById('statusLabel');
+    const statusDetail = document.getElementById('statusDetail');
+    const launchBtn = document.getElementById('launchBtn');
+    const retryBtn = document.getElementById('retryBtn');
+
+    let activeUrl = null;
+    let resolveAttempts = 0;
+    const MAX_ATTEMPTS = 8;
+
+    function setStatus(state, label, detail) {
+      statusDot.className = 'status-indicator ' + state;
+      statusLabel.textContent = label;
+      statusDetail.textContent = detail || '';
+    }
 
     function executeRedirect(url) {
       if (!url) return;
-      statusMsg.textContent = "Connecting to Neural Core...";
+      subtitle.textContent = 'Connecting to Neural Core\u2026';
+      launchBtn.classList.add('loading');
       try {
         window.location.replace(url);
       } catch (_) {
@@ -206,38 +405,113 @@
       }
     }
 
+    function fetchWithTimeout(url, opts = {}, ms = 3200) {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), ms);
+      return fetch(url, { ...opts, signal: controller.signal })
+        .finally(() => clearTimeout(id));
+    }
+
+    async function checkEndpointHealth(url) {
+      try {
+        const resp = await fetchWithTimeout(url + '/api/ping', {
+          cache: 'no-store',
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        }, 2800);
+        return resp.ok;
+      } catch (_) {
+        return false;
+      }
+    }
+
     async function resolveLiveEndpoint() {
+      resolveAttempts++;
       const ts = Date.now();
+
       const sources = [
-        "./endpoint.json?t=" + ts,
-        "https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/docs/endpoint.json?t=" + ts,
-        "https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/endpoint.json?t=" + ts
+        './endpoint.json?t=' + ts,
+        'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/docs/endpoint.json?t=' + ts,
+        'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/endpoint.json?t=' + ts
       ];
+
+      setStatus('connecting', 'Resolving endpoint\u2026', 'Attempt ' + resolveAttempts + ' of ' + MAX_ATTEMPTS);
 
       for (const src of sources) {
         try {
-          const resp = await fetch(src, { cache: "no-store", signal: AbortSignal.timeout(2000) });
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data && data.tunnel_url && data.tunnel_url.startsWith("https://")) {
-              activeUrl = data.tunnel_url;
-              directLink.href = activeUrl;
-              executeRedirect(activeUrl);
+          const resp = await fetchWithTimeout(src, { cache: 'no-store' }, 3000);
+          if (!resp.ok) continue;
+          const data = await resp.json();
+
+          const candidates = [
+            data.token_url,
+            data.tunnel_url,
+            data.permanent_url,
+            'https://jarvis.aayushifty.com'
+          ].filter(u => u && typeof u === 'string' && u.startsWith('https://'));
+
+          for (const cand of candidates) {
+            setStatus('connecting', 'Verifying tunnel\u2026', cand.replace('https://', ''));
+            const isHealthy = await checkEndpointHealth(cand);
+            if (isHealthy) {
+              activeUrl = cand;
+              launchBtn.href = activeUrl;
+              launchBtn.classList.remove('loading');
+              setStatus('online', 'JARVIS Online', 'Secure tunnel connected');
+              subtitle.textContent = 'Your PC companion is ready';
+              retryBtn.style.display = 'none';
+              setTimeout(() => executeRedirect(activeUrl), 500);
               return;
             }
+          }
+
+          // If not healthy right now but we have a tunnel_url, allow connecting anyway
+          if (data && data.tunnel_url && data.tunnel_url.startsWith('https://')) {
+            activeUrl = data.tunnel_url;
+            launchBtn.href = activeUrl;
+            launchBtn.classList.remove('loading');
+            setStatus('online', 'Tunnel Resolved', 'Endpoint found \u2014 tap to connect');
+            subtitle.textContent = 'Tunnel available \u2014 connecting';
+            retryBtn.style.display = 'none';
+            setTimeout(() => executeRedirect(activeUrl), 1000);
+            return;
           }
         } catch (_) {}
       }
 
-      // If fetch fails, still attempt to redirect to default activeUrl
-      executeRedirect(activeUrl);
+      // All sources failed
+      if (resolveAttempts >= MAX_ATTEMPTS) {
+        setStatus('offline', 'PC Offline', 'Could not reach JARVIS backend');
+        subtitle.textContent = 'Your PC may be powered off or disconnected';
+        launchBtn.classList.remove('loading');
+        retryBtn.style.display = 'block';
+      } else {
+        setStatus('connecting', 'Searching\u2026', 'Attempt ' + resolveAttempts + ' \u2014 retrying in 3s');
+        subtitle.textContent = 'Looking for your PC\u2026';
+        setTimeout(resolveLiveEndpoint, 3000);
+      }
     }
 
-    // Auto-resolve immediately on load
-    resolveLiveEndpoint();
+    // Launch button manual click
+    launchBtn.addEventListener('click', (e) => {
+      if (activeUrl) {
+        e.preventDefault();
+        executeRedirect(activeUrl);
+      } else if (!activeUrl) {
+        e.preventDefault();
+        resolveAttempts = 0;
+        resolveLiveEndpoint();
+      }
+    });
 
-    // Auto-retry every 3 seconds if page remains active
-    setInterval(resolveLiveEndpoint, 3000);
+    // Retry button
+    retryBtn.addEventListener('click', () => {
+      resolveAttempts = 0;
+      retryBtn.style.display = 'none';
+      resolveLiveEndpoint();
+    });
+
+    // Start resolution on page load
+    resolveLiveEndpoint();
   </script>
 </body>
 </html>
