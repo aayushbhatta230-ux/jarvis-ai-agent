@@ -189,10 +189,8 @@ def _sync_gateway(tunnel_url: str) -> None:
     if not tunnel_url or "api.trycloudflare.com" in tunnel_url:
         return
     try:
-        token = get_tunnel_token()
         endpoint_data = {
             "tunnel_url": tunnel_url,
-            "token_url": "https://jarvis.aayushifty.com" if token else None,
             "permanent_portal": "https://aayushbhatta230-ux.github.io/jarvis-ai-agent/",
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "status": "online",

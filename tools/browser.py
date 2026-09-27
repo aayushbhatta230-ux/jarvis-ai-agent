@@ -59,21 +59,24 @@ def open_url(url: str) -> str:
 				raise RuntimeError(f"Could not open browser URL: {exc}")
 
 	# Force the browser to the foreground so the user actually sees it!
-	for _ in range(6):
-		time.sleep(0.3)
+	for _ in range(4):
+		time.sleep(0.15)
 		attach_desktop()
 		found, _ = focus_window_by_keyword("chrome", "google chrome", "edge", "browser", "firefox", "brave")
 		if found:
 			break
 
-	# Refresh preview in background for mobile companion
-	try:
-		from tools.screen import capture_screen
-		from pathlib import Path
-		web_preview = Path(__file__).resolve().parent.parent / "interface" / "latest_screenshot.png"
-		capture_screen(output_path=str(web_preview))
-	except Exception:
-		pass
+	# Refresh preview in background thread for mobile companion
+	def _async_preview():
+		try:
+			from tools.screen import capture_screen
+			from pathlib import Path
+			web_preview = Path(__file__).resolve().parent.parent / "interface" / "latest_screenshot.png"
+			capture_screen(output_path=str(web_preview))
+		except Exception:
+			pass
+	import threading
+	threading.Thread(target=_async_preview, daemon=True).start()
 
 	domain = clean.replace("https://", "").replace("http://", "").split("/")[0].replace("www.", "")
 	return f"Opened {domain} on your PC, sir."

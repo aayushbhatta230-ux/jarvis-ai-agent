@@ -30,12 +30,22 @@ def get_local_ip() -> str:
 	"""Discover the machine's primary local LAN IP address."""
 	try:
 		s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-		s.connect(("8.8.8.8", 80))
+		s.connect(("1.1.1.1", 80))
 		ip = s.getsockname()[0]
 		s.close()
-		return ip
+		if ip and not ip.startswith("127."):
+			return ip
 	except Exception:
-		return "127.0.0.1"
+		pass
+	try:
+		hostname = socket.gethostname()
+		_, _, ips = socket.gethostbyname_ex(hostname)
+		for ip in ips:
+			if ip and not ip.startswith("127."):
+				return ip
+	except Exception:
+		pass
+	return "127.0.0.1"
 
 # BASE_DIR is the directory that contains this module (interface/), and also
 # where index.html / style.css / app.js live.
