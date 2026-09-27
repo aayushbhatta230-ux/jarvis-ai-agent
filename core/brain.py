@@ -207,7 +207,7 @@ class Brain:
         try:
             query = self._build_query(prompt)
             # Screen-dependent queries need more tokens for useful descriptions
-            tokens = 200 if self._is_screen_dependent(prompt) else 120
+            tokens = 280 if self._is_screen_dependent(prompt) else 180
 
             response = self._jarvis.ask(
                 query,
@@ -246,9 +246,9 @@ class Brain:
         thread-safe queue bridge the two without changing ConversationManager.
         """
 
+        default_tokens = 280 if self._is_screen_dependent(prompt) else 180
         if options is None:
-            tokens = 200 if self._is_screen_dependent(prompt) else 120
-            options = {"num_predict": tokens}
+            options = {"num_predict": default_tokens}
 
         query = self._build_query(prompt)
 
@@ -260,7 +260,7 @@ class Brain:
                 async for token in self._jarvis.ask_stream(
                     query,
                     model=self.model,
-                    max_tokens=options.get("num_predict", 65),
+                    max_tokens=options.get("num_predict", default_tokens),
                     context=False,
                 ):
                     token_queue.put(("token", token))

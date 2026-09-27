@@ -189,9 +189,10 @@ def _sync_gateway(tunnel_url: str) -> None:
     if not tunnel_url or "api.trycloudflare.com" in tunnel_url:
         return
     try:
-        DOCS_DIR.mkdir(parents=True, exist_ok=True)
+        token = get_tunnel_token()
         endpoint_data = {
             "tunnel_url": tunnel_url,
+            "token_url": "https://jarvis.aayushifty.com" if token else None,
             "permanent_portal": "https://aayushbhatta230-ux.github.io/jarvis-ai-agent/",
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "status": "online",
@@ -336,16 +337,25 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
         global _tunnel_url, _tunnel_process
 
         # -------------------------------------------------------------
-        # Mode 1: Cloudflare Tunnel (UNLIMITED BANDWIDTH, PERSISTENT DAEMON)
+        # Mode 1: Cloudflare Tunnel (Token-backed Named Tunnel or Quick Tunnel)
         # -------------------------------------------------------------
         if cloudflared:
-            cmd = [
-                cloudflared, "tunnel", "--url", f"http://127.0.0.1:{port}",
-                "--no-autoupdate",
-            ]
-            print(f"[TUNNEL] Launching persistent Cloudflare Tunnel: {' '.join(cmd)}")
+            token = get_tunnel_token()
+            use_token = bool(token)
 
             while _running:
+                if use_token:
+                    cmd = [
+                        cloudflared, "tunnel", "--no-autoupdate", "run", "--token", token
+                    ]
+                    print(f"[TUNNEL] Launching Cloudflare Zero Trust Named Tunnel using configured token...")
+                else:
+                    cmd = [
+                        cloudflared, "tunnel", "--url", f"http://127.0.0.1:{port}",
+                        "--no-autoupdate",
+                    ]
+                    print(f"[TUNNEL] Launching persistent Cloudflare Tunnel: {' '.join(cmd)}")
+
                 try:
                     # Windows: CREATE_NEW_PROCESS_GROUP allows cloudflared to persist cleanly
                     creationflags = (
@@ -370,10 +380,51 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
                     _tunnel_process = proc
 
                 url_pattern = re.compile(r"https://[a-zA-Z0-9\-]+\.trycloudflare\.com")
+                hostname_pattern = re.compile(r'"hostname"\s*:\s*"([^"]+)"')
+                started_time = time.time()
+                registered = False
+
                 for line in proc.stdout:
                     line = line.strip()
                     if not line:
                         continue
+
+                    # If in token mode, look for successful registration
+                    if use_token:
+                        host_match = hostname_pattern.search(line)
+                        if host_match:
+                            domain = host_match.group(1).strip()
+                            url = f"https://{domain}"
+                            registered = True
+                            with _lock:
+                                _tunnel_url = url
+                            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                            TUNNEL_URL_FILE.write_text(url, encoding="utf-8")
+                            PERMANENT_URL_FILE.write_text(url, encoding="utf-8")
+                            print("=" * 60)
+                            print("  JARVIS CLOUDFLARE NAMED TUNNEL ACTIVE (VIA TOKEN):")
+                            print(f"  --> {url}")
+                            print("  Permanent branded domain is live and active!")
+                            print("=" * 60)
+                            if callback:
+                                callback(url)
+                            _sync_gateway(url)
+                        elif "Registered tunnel connection" in line and not registered:
+                            registered = True
+                            url = "https://jarvis.aayushifty.com"
+                            with _lock:
+                                _tunnel_url = url
+                            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                            TUNNEL_URL_FILE.write_text(url, encoding="utf-8")
+                            PERMANENT_URL_FILE.write_text(url, encoding="utf-8")
+                            print("=" * 60)
+                            print("  JARVIS CLOUDFLARE NAMED TUNNEL CONNECTED:")
+                            print(f"  --> {url}")
+                            print("=" * 60)
+                            if callback:
+                                callback(url)
+                            _sync_gateway(url)
+
                     if "Unauthorized: Tunnel not found" in line or "Register tunnel error" in line:
                         print("[TUNNEL] Quick tunnel lease expired on Cloudflare edge (Error 1016 prevented). Auto-recovering...")
                         try:
@@ -381,8 +432,9 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
                         except Exception:
                             pass
                         break
+
                     match = url_pattern.search(line)
-                    if match:
+                    if match and not use_token:
                         url = match.group(0)
                         if "api.trycloudflare.com" in url:
                             continue
@@ -401,6 +453,11 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
                         _sync_gateway(url)
 
                 proc.wait()
+                # If token mode crashed quickly, fall back to quick tunnel mode
+                if use_token and (time.time() - started_time < 8) and not registered:
+                    print("[TUNNEL] Token tunnel did not stay connected. Falling back to Quick Tunnel...")
+                    use_token = False
+
                 with _lock:
                     _tunnel_url = None
                     _tunnel_process = None

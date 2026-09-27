@@ -63,6 +63,12 @@ function timestamp() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
 function setBodyState(state) {
   app.state = state;
   body.dataset.state = state;
@@ -852,24 +858,36 @@ async function sendCommand(text, source = 'text') {
   pauseContinuousVoice();
 
   try {
-    const res = await postJSON('/api/command', { text: clean, source, wait: true });
-    // SSE (/events) handles real-time message rendering and streaming TTS.
-    // If SSE is offline or disconnected, fall back to postJSON response:
-    if (!app.connected && res && res.response) {
+    // When SSE is connected, fire-and-forget (SSE delivers the response).
+    // When SSE is down, use synchronous wait as fallback.
+    const shouldWait = !app.connected || !eventSource || eventSource.readyState !== EventSource.OPEN;
+    const res = await postJSON('/api/command', { text: clean, source, wait: shouldWait });
+
+    if (shouldWait && res && res.response) {
       const respText = res.response.trim();
       addMessage('assistant', respText);
       showCoreResponse(respText);
       speakOnPhone(respText);
     }
-    setBodyState('listening');
-    updateStatusCaption('Listening continuously…');
+
+    // Don't force state to listening here — SSE state events will do it.
+    // Only set if SSE is disconnected.
+    if (shouldWait) {
+      setBodyState('listening');
+      updateStatusCaption('Listening continuously…');
+    }
   } catch(e) {
     console.warn('Command dispatch error:', e);
     toast('JARVIS not responding.', true);
     setBodyState('listening');
     updateStatusCaption('Listening continuously…');
-    resumeContinuousVoice();
   }
+
+  // Always resume voice after a short delay
+  setTimeout(() => {
+    isVoicePaused = false;
+    resumeContinuousVoice();
+  }, 800);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2381,7 +2399,7 @@ async function refreshDesktopTabs() {
   lastDesktopSummaryTime = now;
 
   try {
-    const res = await fetchJSON('/api/desktop/summary');
+    const res = await getJSON('/api/desktop/summary');
     if (!res || !res.ok) return;
 
     screenTabsRibbon.innerHTML = '';
@@ -2446,8 +2464,12 @@ async function refreshDesktopTabs() {
 }
 
 // Stream Mode Switcher (Turbo Frame vs Stream)
+// Mobile Safari cannot reliably render MJPEG multipart streams, so we
+// default mobile devices to polled-frame ("turbo") mode which fetches
+// individual JPEG frames via fetch() + blob URLs for rock-solid playback.
 const btnStreamMode = document.getElementById('btnStreamMode');
-let isTurboMode = false;
+const _isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+let isTurboMode = _isMobileDevice; // default ON for mobile
 let turboFrameInterval = null;
 
 function toggleStreamMode() {
@@ -2459,7 +2481,7 @@ function toggleStreamMode() {
   if (isTurboMode) {
     if (pcScreenImg) pcScreenImg.src = '';
     startTurboFrameLoop();
-    toast('Turbo Frame Mode (10 FPS polling active)');
+    toast('Turbo Frame Mode active (optimized for mobile)');
   } else {
     stopTurboFrameLoop();
     if (pcScreenImg) pcScreenImg.src = `/api/screen/stream?t=${Date.now()}`;
@@ -2500,6 +2522,11 @@ function stopTurboFrameLoop() {
 }
 
 if (btnStreamMode) {
+  // Show initial state correctly for mobile default
+  if (isTurboMode) {
+    btnStreamMode.textContent = '⚡ Turbo (On)';
+    btnStreamMode.classList.add('active');
+  }
   btnStreamMode.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleStreamMode();
@@ -2586,7 +2613,17 @@ async function fetchLiveMirrorFrame() {
 
 function startLiveMirror() {
   if (mirrorTimer) clearTimeout(mirrorTimer);
-  fetchLiveMirrorFrame();
+  // On mobile, always use polled frames. On desktop, start the MJPEG stream
+  // unless user manually switched to turbo.
+  if (_isMobileDevice || isTurboMode) {
+    fetchLiveMirrorFrame();
+  } else {
+    // Desktop MJPEG stream + polled frame fallback
+    if (pcScreenImg && currentView === 'screen') {
+      pcScreenImg.src = `/api/screen/stream?t=${Date.now()}`;
+    }
+    fetchLiveMirrorFrame();
+  }
 }
 
 function openMaximizedMirror() {

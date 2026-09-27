@@ -100,10 +100,9 @@ class JarvisHandler(BaseHTTPRequestHandler):
 		self.send_header("Access-Control-Allow-Origin", "*")
 		self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
 		self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, ngrok-skip-browser-warning")
-		self.send_header("Connection", "close")
+		self.send_header("Connection", "keep-alive")
 		self.end_headers()
 		self.wfile.write(body)
-		self.close_connection = True
 
 	def do_HEAD(self) -> None:
 		"""Respond to HEAD requests (used by curl -I, health checkers, ngrok)."""
@@ -144,7 +143,7 @@ class JarvisHandler(BaseHTTPRequestHandler):
 		if path == "/api/state":
 			self._send_json(200, {"state": self.manager.state, "turn": self.manager.turn_id})
 			return
-		if path == "/api/health":
+		if path == "/api/health" or path == "/api/ping":
 			self._send_json(200, {"ok": True, "state": self.manager.state})
 			return
 		if path == "/api/info":
@@ -312,10 +311,9 @@ class JarvisHandler(BaseHTTPRequestHandler):
 		self.send_header("Access-Control-Allow-Origin", "*")
 		self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		self.send_header("Pragma", "no-cache")
-		self.send_header("Connection", "close")
+		self.send_header("Connection", "keep-alive")
 		self.end_headers()
 		self.wfile.write(content)
-		self.close_connection = True
 
 	def _sse_handler(self) -> None:
 		"""Stream events to one browser client using chunked transfer encoding.
@@ -388,6 +386,9 @@ class JarvisHandler(BaseHTTPRequestHandler):
 		while not getattr(self.server, "_shutting_down", False):
 			try:
 				im = _grab_image()
+				if im is None:
+					time.sleep(0.1)
+					continue
 				# 1024x576 bilinear for smooth 10-14 FPS stream on mobile
 				im = im.resize((1024, 576), Image.Resampling.BILINEAR)
 				buf = io.BytesIO()
@@ -416,9 +417,16 @@ class JarvisHandler(BaseHTTPRequestHandler):
 			from PIL import Image
 			import io
 			im = _grab_image()
-			im = im.resize((1024, 576), Image.Resampling.BILINEAR)
+			if im is None:
+				self._send_json(503, {"error": "screen capture unavailable"})
+				return
+			# Adaptive quality: smaller resolution = faster encode + transfer
+			w, h = im.size
+			scale = min(1.0, 1024 / max(w, 1))
+			if scale < 1.0:
+				im = im.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR)
 			buf = io.BytesIO()
-			im.save(buf, format="JPEG", quality=52)
+			im.save(buf, format="JPEG", quality=50, optimize=True)
 			jpeg = buf.getvalue()
 			self.send_response(200)
 			self.send_header("Content-Type", "image/jpeg")
@@ -426,6 +434,7 @@ class JarvisHandler(BaseHTTPRequestHandler):
 			self.send_header("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0")
 			self.send_header("Pragma", "no-cache")
 			self.send_header("Access-Control-Allow-Origin", "*")
+			self.send_header("Connection", "keep-alive")
 			self.end_headers()
 			self.wfile.write(jpeg)
 		except Exception as exc:
@@ -640,6 +649,7 @@ class JarvisHandler(BaseHTTPRequestHandler):
 			body = _json_body(self)
 			if body is None or "audio" not in body:
 				self._send_json(400, {"error": "expected audio (base64)"})
+				return
 			if hasattr(self.manager, "set_remote_active"):
 				self.manager.set_remote_active(True)
 			try:

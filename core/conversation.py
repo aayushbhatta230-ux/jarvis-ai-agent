@@ -606,18 +606,21 @@ class ConversationManager:
 	def _stream_options(self) -> dict:
 		"""Token budget for streamed LLM responses."""
 		verbosity = self.settings.get("response_verbosity")
+		transcript = getattr(self, '_current_raw_transcript', '')
+		if self._asks_detailed_explanation(transcript):
+			return {"num_predict": 400}
 		# Screen-dependent queries need more tokens for useful descriptions
 		is_screen = self._needs_screen_context(
 			getattr(self, '_current_intent', None),
-			getattr(self, '_current_raw_transcript', ''),
+			transcript,
 		)
 		if is_screen:
-			return {"num_predict": 200}
+			return {"num_predict": 280}
 		if verbosity == "concise":
-			return {"num_predict": 80}
+			return {"num_predict": 100}
 		if verbosity == "detailed":
-			return {"num_predict": 250}
-		return {"num_predict": 120}
+			return {"num_predict": 350}
+		return {"num_predict": 180}
 
 	def _push_speech(self, full_text: str) -> None:
 		"""Enqueue newly-completed speakable sentences so TTS starts and
