@@ -6,5 +6,6 @@
   "theme": "dark",
   "auto_listen": true,
   "barge_in": false,
-  "permission_level": "FULL_CONTROL"
+  "permission_level": "FULL_CONTROL",
+  "pc_speaker_enabled": false
 }
