@@ -364,15 +364,28 @@
       <span class="btn-text">Launch JARVIS Core</span>
     </a>
 
+    <div class="quick-options" style="margin-top: 14px; width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 8px;">
+      <button class="btn-secondary-opt" id="btnLanConnect" type="button" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #c4b5fd; padding: 10px 16px; border-radius: 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        <span>📶</span> Connect via Local Wi-Fi
+      </button>
+      <button class="btn-secondary-opt" id="btnToggleCustom" type="button" style="background: transparent; border: none; color: #80deea; font-size: 0.78rem; text-decoration: underline; cursor: pointer; padding: 4px;">
+        ⚙️ Enter / Paste custom URL
+      </button>
+      <div id="customUrlBox" style="display: none; flex-direction: column; gap: 6px; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 10px; border: 1px solid rgba(0,229,255,0.2);">
+        <input type="text" id="customUrlInput" placeholder="https://....trycloudflare.com" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(0,229,255,0.3); border-radius: 8px; color: #fff; padding: 8px; font-size: 0.82rem; width: 100%; box-sizing: border-box;">
+        <button type="button" id="btnSaveCustom" style="background: #00e5ff; color: #050310; border: none; border-radius: 8px; font-weight: bold; padding: 7px; cursor: pointer; font-size: 0.82rem;">Save & Connect</button>
+      </div>
+    </div>
+
     <button class="btn-retry" id="retryBtn" type="button">&#8635; Retry Connection</button>
 
     <div class="footer-info">
       <p class="footer-tip">
-        <strong>&#128274; Permanent Safari Bookmark:</strong><br>
-        Tap <strong>Share &rarr; Add to Home Screen</strong> to pin JARVIS.<br>
-        This gateway auto-resolves the live tunnel URL.
+        <strong>🔒 Free Permanent Safari Bookmark:</strong><br>
+        Tap <strong>Share &rarr; Add to Home Screen</strong> in Safari.<br>
+        No domain purchase required &mdash; connects via free secure relay.
       </p>
-      <p class="footer-version">JARVIS GATEWAY v2.0</p>
+      <p class="footer-version">JARVIS GATEWAY v2.2 &bull; Free Relay</p>
     </div>
   </div>
 
@@ -383,6 +396,11 @@
     const statusDetail = document.getElementById('statusDetail');
     const launchBtn = document.getElementById('launchBtn');
     const retryBtn = document.getElementById('retryBtn');
+    const btnLanConnect = document.getElementById('btnLanConnect');
+    const btnToggleCustom = document.getElementById('btnToggleCustom');
+    const customUrlBox = document.getElementById('customUrlBox');
+    const customUrlInput = document.getElementById('customUrlInput');
+    const btnSaveCustom = document.getElementById('btnSaveCustom');
 
     let activeUrl = null;
     let resolveAttempts = 0;
@@ -396,7 +414,7 @@
 
     function executeRedirect(url) {
       if (!url) return;
-      subtitle.textContent = 'Connecting to Neural Core\u2026';
+      subtitle.textContent = 'Opening JARVIS Interface\u2026';
       launchBtn.classList.add('loading');
       try {
         window.location.replace(url);
@@ -434,7 +452,22 @@
         'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/endpoint.json?t=' + ts
       ];
 
-      setStatus('connecting', 'Resolving endpoint\u2026', 'Attempt ' + resolveAttempts + ' of ' + MAX_ATTEMPTS);
+      setStatus('connecting', 'Resolving relay\u2026', 'Checking free secure tunnel');
+
+      // Check saved custom URL first
+      const savedCustom = localStorage.getItem('jarvis_custom_url');
+      if (savedCustom && (savedCustom.startsWith('https://') || savedCustom.startsWith('http://'))) {
+        const ok = await checkEndpointHealth(savedCustom);
+        if (ok) {
+          activeUrl = savedCustom;
+          launchBtn.href = activeUrl;
+          launchBtn.classList.remove('loading');
+          setStatus('online', 'Custom Relay Connected', activeUrl.replace(/^https?:\/\//, ''));
+          subtitle.textContent = 'Connecting to your saved URL';
+          setTimeout(() => executeRedirect(activeUrl), 400);
+          return;
+        }
+      }
 
       for (const src of sources) {
         try {
@@ -443,11 +476,10 @@
           const data = await resp.json();
 
           const candidates = [
-            data.token_url,
             data.tunnel_url,
             data.permanent_url,
-            'https://jarvis.aayushifty.com'
-          ].filter(u => u && typeof u === 'string' && u.startsWith('https://'));
+            'https://promising-thu-adjust-hospital.trycloudflare.com'
+          ].filter(u => u && typeof u === 'string' && u.startsWith('https://') && !u.includes('aayushifty.com'));
 
           for (const cand of candidates) {
             setStatus('connecting', 'Verifying tunnel\u2026', cand.replace('https://', ''));
@@ -456,61 +488,79 @@
               activeUrl = cand;
               launchBtn.href = activeUrl;
               launchBtn.classList.remove('loading');
-              setStatus('online', 'JARVIS Online', 'Secure tunnel connected');
-              subtitle.textContent = 'Your PC companion is ready';
+              setStatus('online', 'JARVIS Online', 'Free Cloudflare relay active');
+              subtitle.textContent = 'PC companion connected \u2014 opening';
               retryBtn.style.display = 'none';
               setTimeout(() => executeRedirect(activeUrl), 500);
               return;
             }
           }
 
-          // If not healthy right now but we have a tunnel_url, allow connecting anyway
-          if (data && data.tunnel_url && data.tunnel_url.startsWith('https://')) {
+          if (data && data.tunnel_url && data.tunnel_url.startsWith('https://') && !data.tunnel_url.includes('aayushifty.com')) {
             activeUrl = data.tunnel_url;
             launchBtn.href = activeUrl;
             launchBtn.classList.remove('loading');
-            setStatus('online', 'Tunnel Resolved', 'Endpoint found \u2014 tap to connect');
-            subtitle.textContent = 'Tunnel available \u2014 connecting';
+            setStatus('online', 'Relay Resolved', 'Tap Launch to connect');
+            subtitle.textContent = 'Relay ready';
             retryBtn.style.display = 'none';
-            setTimeout(() => executeRedirect(activeUrl), 1000);
+            setTimeout(() => executeRedirect(activeUrl), 800);
             return;
           }
         } catch (_) {}
       }
 
-      // All sources failed
       if (resolveAttempts >= MAX_ATTEMPTS) {
-        setStatus('offline', 'PC Offline', 'Could not reach JARVIS backend');
-        subtitle.textContent = 'Your PC may be powered off or disconnected';
+        setStatus('offline', 'PC Offline', 'Ensure JARVIS is running on your PC');
+        subtitle.textContent = 'Could not reach tunnel relay';
         launchBtn.classList.remove('loading');
         retryBtn.style.display = 'block';
       } else {
-        setStatus('connecting', 'Searching\u2026', 'Attempt ' + resolveAttempts + ' \u2014 retrying in 3s');
-        subtitle.textContent = 'Looking for your PC\u2026';
-        setTimeout(resolveLiveEndpoint, 3000);
+        setStatus('connecting', 'Searching\u2026', 'Attempt ' + resolveAttempts + ' of ' + MAX_ATTEMPTS);
+        setTimeout(resolveLiveEndpoint, 2500);
       }
     }
 
-    // Launch button manual click
     launchBtn.addEventListener('click', (e) => {
       if (activeUrl) {
         e.preventDefault();
         executeRedirect(activeUrl);
-      } else if (!activeUrl) {
+      } else {
         e.preventDefault();
         resolveAttempts = 0;
         resolveLiveEndpoint();
       }
     });
 
-    // Retry button
     retryBtn.addEventListener('click', () => {
       resolveAttempts = 0;
       retryBtn.style.display = 'none';
       resolveLiveEndpoint();
     });
 
-    // Start resolution on page load
+    if (btnLanConnect) {
+      btnLanConnect.addEventListener('click', () => {
+        const lanUrl = 'http://169.254.240.253:8765';
+        executeRedirect(lanUrl);
+      });
+    }
+
+    if (btnToggleCustom && customUrlBox) {
+      btnToggleCustom.addEventListener('click', () => {
+        customUrlBox.style.display = customUrlBox.style.display === 'none' ? 'flex' : 'none';
+        if (customUrlInput && activeUrl) customUrlInput.value = activeUrl;
+      });
+    }
+
+    if (btnSaveCustom && customUrlInput) {
+      btnSaveCustom.addEventListener('click', () => {
+        const val = customUrlInput.value.trim();
+        if (val) {
+          localStorage.setItem('jarvis_custom_url', val);
+          executeRedirect(val);
+        }
+      });
+    }
+
     resolveLiveEndpoint();
   </script>
 </body>
