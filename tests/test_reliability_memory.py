@@ -134,7 +134,18 @@ def test_general_knowledge_still_routes_to_browser(monkeypatch):
 
 def test_browser_search_still_opens_when_asked(monkeypatch):
     import tools.browser as browser
+    import tools.computer as computer
     opened = {}
-    monkeypatch.setattr(browser.webbrowser, "open", lambda url, new=0: opened.setdefault("u", url) or True)
+    # open_url prefers os.startfile on Windows and only falls back to
+    # webbrowser.open, so both launch paths are stubbed out here.
+    monkeypatch.setattr(browser.os, "startfile", lambda url: opened.setdefault("u", url) or True)
+    monkeypatch.setattr(browser.webbrowser, "open", lambda url, *a, **k: opened.setdefault("u", url) or True)
+    # Skip the window-focusing and screenshot side effects.
+    monkeypatch.setattr(browser, "CHROME_PATH", "")
+    monkeypatch.setattr(browser, "CHROME_X86", "")
+    monkeypatch.setattr(browser.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(computer, "attach_desktop", lambda: True)
+    monkeypatch.setattr(computer, "focus_window_by_keyword", lambda *a, **k: (True, None))
+    monkeypatch.setattr(browser.subprocess, "Popen", lambda *a, **k: None)
     assert "python" in browser.search_web("python")
     assert "google.com/search" in opened["u"]

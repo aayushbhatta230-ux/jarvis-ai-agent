@@ -52,21 +52,33 @@ def test_capability_registry_reports_availability():
 
 
 # --- Vision OCR + bounding boxes ------------------------------------- #
+# These exercise the subprocess-based Tesseract engine (raw TSV parsing)
+# rather than the legacy pytesseract dictionary API.
+_TSV_HEADER = "level\tnum\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"
+
+
+def _tsv_row(text, left, top, width, height, conf=95.0, block="1", par="1", line="1", word="1"):
+    return f"5\t{word}\t{block}\t{par}\t{line}\t{word}\t{left}\t{top}\t{width}\t{height}\t{conf:.1f}\t{text}"
+
+
 def test_analyze_screen_returns_boxes(monkeypatch):
     from vision import analyze as va
-    fake_data = {
-        "text": ["Hello", "world", "", "Search"],
-        "left": [10, 60, 0, 200],
-        "top": [20, 20, 0, 300],
-        "width": [40, 50, 0, 60],
-        "height": [12, 12, 0, 14],
-    }
-    monkeypatch.setattr(va.pytesseract, "image_to_data", lambda img, output_type=None: fake_data)
+    tsv = "\n".join([
+        _TSV_HEADER,
+        # first line: "Hello world"
+        _tsv_row("Hello", 10, 20, 40, 12, word="1"),
+        _tsv_row("world", 60, 20, 50, 12, word="2"),
+        # second line: "Search" (low-confidence noise in between is dropped)
+        _tsv_row("~~~", 0, 0, 0, 0, conf=5.0, line="2", word="1"),
+        _tsv_row("Search", 200, 300, 60, 14, line="2", word="2"),
+    ]) + "\n"
+    monkeypatch.setattr(va, "_run_tesseract", lambda img: tsv)
     monkeypatch.setattr(va, "_grab_image", lambda: object())
     monkeypatch.setattr(va, "tesseract_available", lambda: True)
+    monkeypatch.setattr(va, "HAS_WINDOWS_OCR", False)
     result = va.analyze_screen()
     assert isinstance(result, va.VisionResult)
-    assert result.full_text == "Hello world Search"
+    assert result.full_text == "Hello world\nSearch"
     assert [b.text for b in result.boxes] == ["Hello", "world", "Search"]
     assert result.boxes[0].bbox == (10, 20, 40, 12)
     assert result.boxes[2].bbox == (200, 300, 60, 14)
@@ -79,7 +91,7 @@ def test_analyze_screen_raises_clearly_without_ocr_engine(monkeypatch):
     monkeypatch.setattr(va, "HAS_WINDOWS_OCR", False)
     with pytest.raises(RuntimeError) as exc:
         va.analyze_screen()
-    assert "not installed" in str(exc.value)
+    assert "OCR engine not found" in str(exc.value)
 
 
 # --- Screen target detection ----------------------------------------- #

@@ -1001,6 +1001,7 @@ class ConversationManager:
 					if kind in EXTRACT_KINDS or kind.rstrip("s") in EXTRACT_KINDS:
 						res = extract_from_file(target, kind)
 						if res.get("ok"):
+							self._emit_message("assistant", res["spoken"])
 							self._emit_message("assistant", res["display"])
 							return res["spoken"]
 						return res.get("spoken")
@@ -1019,6 +1020,7 @@ class ConversationManager:
 					from tools.file_analysis import extract_from_file
 					res = extract_from_file(target, kind_match.group(1))
 					if res.get("ok"):
+						self._emit_message("assistant", res["spoken"])
 						self._emit_message("assistant", res["display"])
 						return res["spoken"]
 					return res.get("spoken")
@@ -1494,6 +1496,7 @@ class ConversationManager:
 			if res.get("most_recent_path"):
 				self._last_file_reference = res["most_recent_path"]
 				self._conversation_context["last_file"] = res["most_recent_path"]
+			self._emit_message("assistant", res["spoken"])
 			self._emit_message("assistant", res["display"])
 			return res["spoken"]
 
@@ -1509,6 +1512,7 @@ class ConversationManager:
 			if res.get("most_recent_path"):
 				self._last_file_reference = res["most_recent_path"]
 				self._conversation_context["last_file"] = res["most_recent_path"]
+			self._emit_message("assistant", res["spoken"])
 			self._emit_message("assistant", res["display"])
 			return res["spoken"]
 
@@ -1530,6 +1534,7 @@ class ConversationManager:
 					folder_target = folder
 					break
 			res = list_project_files(folder_target)
+			self._emit_message("assistant", res["spoken"])
 			self._emit_message("assistant", res["display"])
 			return res["spoken"]
 
@@ -1645,6 +1650,7 @@ class ConversationManager:
 		if any(k in lower_clean for k in ("clear cache", "clean cache", "clear temporary files", "clean temp", "free up space", "clear temp files")):
 			from tools.clean_cache import clean_system_cache
 			res = clean_system_cache()
+			self._emit_message("assistant", res["spoken"])
 			self._emit_message("assistant", res["display"])
 			return res["spoken"]
 
@@ -1838,6 +1844,7 @@ class ConversationManager:
 				from tools.web_researcher import research_topic
 				r_res = research_topic(topic_target)
 				if r_res.get("ok"):
+					self._emit_message("assistant", r_res["spoken"])
 					self._emit_message("assistant", r_res["display"])
 					return r_res["spoken"]
 
@@ -1862,6 +1869,7 @@ class ConversationManager:
 			from tools.dev_assistant import analyze_code_file
 			c_res = analyze_code_file(fn_target)
 			if c_res.get("ok"):
+				self._emit_message("assistant", c_res["spoken"])
 				self._emit_message("assistant", c_res["display"])
 				return c_res["spoken"]
 
