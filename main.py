@@ -131,15 +131,18 @@ def main() -> None:
 		from interface.desktop import start_desktop_ui
 		try:
 			start_desktop_ui(manager)
+			print("[UI] Desktop UI closed. Continuing to serve web & remote interface...")
 		except KeyboardInterrupt:
 			print("\nShutting down...")
 		except (SystemExit, Exception) as ui_err:
-			print(f"[UI] Desktop UI loop finished ({ui_err}). Serving web & remote interface...")
-			while True:
-				try:
-					time.sleep(1)
-				except KeyboardInterrupt:
-					break
+			print(f"[UI] Desktop UI finished ({ui_err}). Serving web & remote interface...")
+
+		while True:
+			try:
+				time.sleep(1)
+			except KeyboardInterrupt:
+				print("\nShutting down...")
+				break
 	finally:
 		# Stop tunnel first (fast)
 		try:

@@ -18,7 +18,8 @@ APPLICATIONS = {
     "notepad": "notepad.exe",
     "calculator": "calc.exe",
     "paint": "mspaint.exe",
-    "browser": None,  # Special handling
+    "camera": "microsoft.windows.camera:",
+    "browser": "https://www.google.com",
     "chrome": "chrome.exe",
     "firefox": "firefox.exe",
     "edge": "msedge.exe",
@@ -148,38 +149,51 @@ def bring_window_to_front(hwnd: int) -> None:
 def focus_window_by_keyword(*keywords: str) -> tuple[bool, str]:
     """Find an existing window matching any of the given keywords and bring it to front.
 
-    Uses raw ctypes EnumWindows to find ALL windows including UWP apps
-    (modern Notepad, Calculator, etc.) which pygetwindow cannot see.
+    Uses ctypes EnumDesktopWindows and EnumWindows to find ALL windows including UWP apps
+    (modern Notepad, Calculator, Camera, etc.).
     """
     attach_desktop()
     import ctypes
+    from ctypes import wintypes
     user32 = ctypes.windll.user32
     lowers = [k.lower() for k in keywords if k]
 
-    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, wintypes.LPARAM)
     found_hwnd = None
     found_title = ""
 
     def enum_cb(hwnd, lparam):
         nonlocal found_hwnd, found_title
         if not user32.IsWindowVisible(hwnd):
-            return True
+            return 1
         length = user32.GetWindowTextLengthW(hwnd)
         if length <= 0:
-            return True
+            return 1
         buff = ctypes.create_unicode_buffer(length + 1)
         user32.GetWindowTextW(hwnd, buff, length + 1)
         title = buff.value
         if title and any(k in title.lower() for k in lowers):
             found_hwnd = hwnd
             found_title = title
-            return False  # Stop enumeration
-        return True
+            return 0  # Stop enumeration
+        return 1
 
+    cb = EnumWindowsProc(enum_cb)
     try:
-        user32.EnumWindows(EnumWindowsProc(enum_cb), 0)
+        user32.OpenInputDesktop.restype = wintypes.HANDLE
+        user32.SetThreadDesktop.argtypes = [wintypes.HANDLE]
+        hinput = user32.OpenInputDesktop(0, False, 0x01FF)
+        if hinput:
+            user32.SetThreadDesktop(hinput)
+            user32.EnumDesktopWindows(hinput, cb, 0)
     except Exception:
         pass
+
+    if not found_hwnd:
+        try:
+            user32.EnumWindows(cb, 0)
+        except Exception:
+            pass
 
     if found_hwnd:
         bring_window_to_front(found_hwnd)
@@ -193,13 +207,28 @@ def launch(application: str) -> str:
     name = application.strip().lower()
 
     # 1. Map target name to search keywords and launch command
-    #    UWP apps (notepad, calculator) MUST be launched via explorer.exe shell:AppsFolder
-    #    because subprocess/os.startfile creates ghost processes with no visible window.
+    #    UWP apps (notepad, calculator, camera) MUST be launched via protocol or explorer
+    chrome_lnk = r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Google Chrome.lnk"
     app_meta = {
+        "camera": {
+            "keywords": ["camera", "windows camera"],
+            "launch": lambda: os.startfile("microsoft.windows.camera:"),
+            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "microsoft.windows.camera:"], shell=False),
+        },
         "chrome": {
             "keywords": ["chrome", "google chrome"],
-            "launch": lambda: subprocess.Popen([r"C:\Program Files\Google\Chrome\Application\chrome.exe"]),
-            "fallback": lambda: os.startfile("chrome"),
+            "launch": lambda: os.startfile(chrome_lnk) if os.path.exists(chrome_lnk) else os.startfile("chrome"),
+            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", r"C:\Program Files\Google\Chrome\Application\chrome.exe"], shell=False),
+        },
+        "browser": {
+            "keywords": ["chrome", "google chrome", "edge", "microsoft edge", "browser", "firefox", "brave"],
+            "launch": lambda: os.startfile("https://www.google.com"),
+            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "https://www.google.com"], shell=False),
+        },
+        "edge": {
+            "keywords": ["edge", "microsoft edge"],
+            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "msedge"], shell=False),
+            "fallback": lambda: os.startfile("microsoft-edge:"),
         },
         "notepad": {
             "keywords": ["notepad", "untitled"],
@@ -221,7 +250,7 @@ def launch(application: str) -> str:
         },
         "vscode": {
             "keywords": ["visual studio code", "code"],
-            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "code"], shell=False),
+            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "code"], shell=False),
         },
         "settings": {
             "keywords": ["settings"],
@@ -229,11 +258,11 @@ def launch(application: str) -> str:
         },
         "task manager": {
             "keywords": ["task manager"],
-            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "taskmgr"], shell=False),
+            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "taskmgr"], shell=False),
         },
         "explorer": {
             "keywords": ["file explorer", "explorer"],
-            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "explorer"], shell=False),
+            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "explorer"], shell=False),
         },
         "antigravity": {
             "keywords": ["antigravity", "antigravity ide"],

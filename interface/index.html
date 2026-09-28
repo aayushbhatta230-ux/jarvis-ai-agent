@@ -76,6 +76,10 @@
         <span class="menu-icon">&#127918;</span>
         <span class="menu-text"><strong>PC Controls</strong><small>Hardware &amp; media remote</small></span>
       </button>
+      <button type="button" class="menu-item" data-nav="files">
+        <span class="menu-icon">&#128193;</span>
+        <span class="menu-text"><strong>Files</strong><small>Browse &amp; read code</small></span>
+      </button>
       <div class="menu-divider"></div>
       <button type="button" class="menu-item" id="menuBtnRemote">
         <span class="menu-icon">&#128241;</span>
@@ -400,6 +404,56 @@
           </div>
         </div>
       </section>
+      <!-- VIEW 5: FILES EXPLORER & VIEWER -->
+      <section class="view-panel view-files" id="viewFiles" aria-label="JARVIS Files Explorer">
+        <div class="section-header">
+          <button type="button" class="btn-back-pill" id="btnBackFromFiles">&#8592; Core</button>
+          <div class="section-title">
+            <span>&#128193; File Explorer</span>
+            <small id="filesCountBadge">0 files</small>
+          </div>
+          <div class="header-action-group">
+            <button type="button" class="btn-text-action" id="btnRefreshFiles">&#8635; Refresh</button>
+          </div>
+        </div>
+
+        <div class="files-folder-chips" id="filesFolderChips">
+          <button type="button" class="folder-chip active" data-folder="">Workspace</button>
+          <button type="button" class="folder-chip" data-folder="desktop">Desktop</button>
+          <button type="button" class="folder-chip" data-folder="downloads">Downloads</button>
+          <button type="button" class="folder-chip" data-folder="documents">Documents</button>
+          <button type="button" class="folder-chip" data-folder="interface">Interface</button>
+          <button type="button" class="folder-chip" data-folder="core">Core</button>
+          <button type="button" class="folder-chip" data-folder="tools">Tools</button>
+        </div>
+
+        <div class="files-search-row">
+          <input type="search" id="filesSearchInput" placeholder="Filter files by name or extension…" autocomplete="off">
+        </div>
+
+        <!-- File Viewer Card (shown when a file is tapped) -->
+        <div class="file-viewer-card" id="fileViewerCard" hidden>
+          <div class="file-viewer-header">
+            <div class="file-viewer-meta">
+              <strong id="fileViewerName">file.ext</strong>
+              <small id="fileViewerSub">—</small>
+            </div>
+            <div class="file-viewer-actions">
+              <button type="button" class="file-action-btn" id="btnCopyFileContent" title="Copy Content">&#128203; Copy</button>
+              <button type="button" class="file-action-btn" id="btnOpenFileOnPC" title="Open on PC">&#128187; Open PC</button>
+              <button type="button" class="file-action-btn file-action-close" id="btnCloseFileViewer" title="Close">&#10005;</button>
+            </div>
+          </div>
+          <div class="file-viewer-summary" id="fileViewerSummary" hidden></div>
+          <pre class="file-viewer-code"><code id="fileViewerCode"></code></pre>
+        </div>
+
+        <!-- File List Grid / List -->
+        <div class="files-list-container" id="filesListContainer">
+          <div class="files-empty-state">Loading files…</div>
+        </div>
+      </section>
+
     </div>
 
     <!-- GLOBAL PERSISTENT COMMAND BAR (Visible on Core & Chat & Screen) -->
@@ -443,6 +497,10 @@
     <button type="button" class="nav-dock-item" data-nav="remote" id="navDockRemote">
       <span class="nav-dock-icon">&#127918;</span>
       <span class="nav-dock-label">Controls</span>
+    </button>
+    <button type="button" class="nav-dock-item" data-nav="files" id="navDockFiles">
+      <span class="nav-dock-icon">&#128193;</span>
+      <span class="nav-dock-label">Files</span>
     </button>
   </nav>
 

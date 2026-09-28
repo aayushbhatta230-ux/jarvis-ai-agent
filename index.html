@@ -448,6 +448,9 @@
 
       const sources = [
         './endpoint.json?t=' + ts,
+        '../endpoint.json?t=' + ts,
+        'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/gh-pages/docs/endpoint.json?t=' + ts,
+        'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/gh-pages/endpoint.json?t=' + ts,
         'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/docs/endpoint.json?t=' + ts,
         'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/endpoint.json?t=' + ts
       ];
@@ -478,8 +481,8 @@
           const candidates = [
             data.tunnel_url,
             data.permanent_url,
-            'https://promising-thu-adjust-hospital.trycloudflare.com'
-          ].filter(u => u && typeof u === 'string' && u.startsWith('https://') && !u.includes('aayushifty.com'));
+            'https://soa-art-facial-intellectual.trycloudflare.com'
+          ].filter(u => u && typeof u === 'string' && u.startsWith('https://') && !u.includes('aayushifty.com') && !u.includes('promising-thu-adjust-hospital'));
 
           for (const cand of candidates) {
             setStatus('connecting', 'Verifying tunnel\u2026', cand.replace('https://', ''));

@@ -25,6 +25,8 @@ DEFAULTS: dict[str, Any] = {
     # is off by default for reliability. UI/voice "stop" always works.
     "barge_in": False,
     "permission_level": "FULL_CONTROL",
+    # Mute PC hardware speakers by default so responses play on phone only
+    "pc_speaker_enabled": False,
 }
 
 VALID_VERBOSITY = ("concise", "normal", "detailed")
@@ -54,8 +56,12 @@ class Settings:
                     merged[key] = self._coerce(key, value)
         return merged
 
-    def get(self, key: str) -> Any:
-        return self.data.get(key, DEFAULTS.get(key))
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in self.data:
+            return self.data[key]
+        if default is not None:
+            return default
+        return DEFAULTS.get(key)
 
     def set(self, key: str, value: Any) -> Any:
         coerced = self._coerce(key, value)
@@ -89,6 +95,8 @@ class Settings:
             if val in ("OFF", "OBSERVE_ONLY", "CONTROL_WITH_CONFIRMATION", "FULL_CONTROL"):
                 return val
             return DEFAULTS["permission_level"]
+        if key == "pc_speaker_enabled":
+            return bool(value)
         return value
 
     def save(self) -> None:

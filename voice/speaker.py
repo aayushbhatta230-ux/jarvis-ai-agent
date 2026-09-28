@@ -18,8 +18,9 @@ class SpeakerError(RuntimeError):
 
 
 class Speaker:
-	def __init__(self, rate: int = 1) -> None:
+	def __init__(self, rate: int = 1, muted: bool = False) -> None:
 		self.rate = rate
+		self.muted = muted
 		self.engine = None
 		self.voice_name = "unavailable"
 		self.queue: Queue[tuple[str, int]] = Queue()
@@ -88,7 +89,7 @@ class Speaker:
 				except Empty:
 					continue
 				text, generation = item
-				if generation != self.generation or self.cancel_event.is_set():
+				if self.muted or generation != self.generation or self.cancel_event.is_set():
 					self.queue.task_done()
 					continue
 				self.speaking.set()
@@ -126,13 +127,15 @@ class Speaker:
 		Queued chunks are still dropped automatically if an interruption bumps
 		the generation or sets the cancel event.
 		"""
-		if not text or not text.strip():
+		if getattr(self, "muted", False) or not text or not text.strip():
 			return
 		for chunk in sentence_chunks(text):
 			if chunk.strip():
 				self.queue.put((chunk, self.generation))
 
 	def speak(self, text: str, wait: bool = True) -> None:
+		if getattr(self, "muted", False):
+			return
 		try:
 			self.cancel_event.clear()
 			generation = self.generation
@@ -150,6 +153,8 @@ class Speaker:
 		Polls the queue's unfinished-task count so a wedged COM call can
 		never stall the turn loop forever.
 		"""
+		if getattr(self, "muted", False):
+			return
 		started = perf_counter()
 		while self.unfinished > 0 and perf_counter() - started < timeout:
 			if self.cancel_event.is_set() and not self.speaking.is_set():

@@ -209,12 +209,24 @@ class Brain:
             # Screen-dependent queries need more tokens for useful descriptions
             tokens = 280 if self._is_screen_dependent(prompt) else 180
 
-            response = self._jarvis.ask(
-                query,
-                model=self.model,
-                max_tokens=tokens,
-                context=False,
-            ).strip()
+            try:
+                self._jarvis._ensure_engine()
+                from openjarvis.core.types import Message, Role
+                messages = [Message(role=Role.USER, content=query)]
+                res = self._jarvis._engine.generate(
+                    messages,
+                    model=self.model,
+                    max_tokens=tokens,
+                    num_ctx=2048,
+                )
+                response = (res.get("content", "") if isinstance(res, dict) else getattr(res, "content", str(res))).strip()
+            except Exception:
+                response = self._jarvis.ask(
+                    query,
+                    model=self.model,
+                    max_tokens=tokens,
+                    context=False,
+                ).strip()
 
         except Exception as exc:
             raise BrainError(
@@ -257,16 +269,29 @@ class Brain:
 
         async def producer() -> None:
             try:
-                async for token in self._jarvis.ask_stream(
-                    query,
+                self._jarvis._ensure_engine()
+                from openjarvis.core.types import Message, Role
+                messages = [Message(role=Role.USER, content=query)]
+                max_tokens = options.get("num_predict", default_tokens)
+                async for token in self._jarvis._engine.stream(
+                    messages,
                     model=self.model,
-                    max_tokens=options.get("num_predict", default_tokens),
-                    context=False,
+                    max_tokens=max_tokens,
+                    num_ctx=2048,
                 ):
                     token_queue.put(("token", token))
 
-            except Exception as exc:
-                token_queue.put(("error", exc))
+            except Exception:
+                try:
+                    async for token in self._jarvis.ask_stream(
+                        query,
+                        model=self.model,
+                        max_tokens=options.get("num_predict", default_tokens),
+                        context=False,
+                    ):
+                        token_queue.put(("token", token))
+                except Exception as exc:
+                    token_queue.put(("error", exc))
 
             finally:
                 token_queue.put(("done", None))

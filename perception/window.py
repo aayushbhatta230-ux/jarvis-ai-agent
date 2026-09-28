@@ -110,8 +110,19 @@ def list_open_windows() -> list[WindowInfo]:
 
     try:
         win32gui.EnumWindows(enum_cb, None)
-    except Exception as exc:
-        print(f"[PERCEPTION] EnumWindows error: {exc}")
+    except Exception:
+        try:
+            user32 = ctypes.windll.user32
+            from ctypes import wintypes
+            EnumProc = ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, wintypes.LPARAM)
+            def _ctypes_cb(hwnd, _):
+                enum_cb(hwnd, None)
+                return 1
+            hinput = user32.OpenInputDesktop(0, False, 0x01FF)
+            if hinput:
+                user32.EnumDesktopWindows(hinput, EnumProc(_ctypes_cb), 0)
+        except Exception:
+            pass
 
     return results
 

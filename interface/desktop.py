@@ -998,21 +998,26 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def closeEvent(self, event):
-        if getattr(self, "manager", None):
-            self.evt_thread.stop()
-            self.manager.stop()
+        if hasattr(self, "evt_thread") and self.evt_thread:
+            try:
+                self.evt_thread.stop()
+            except Exception:
+                pass
         super().closeEvent(event)
 
 
 def start_desktop_ui(manager=None):
     if QApplication.instance() is None:
-        QApplication.setAttribute(Qt.AA_UseDesktopOpenGL, True)
+        try:
+            QApplication.setAttribute(Qt.AA_UseDesktopOpenGL, True)
+        except Exception:
+            pass
         app = QApplication(sys.argv)
     else:
         app = QApplication.instance()
     window = MainWindow(manager)
     window.show()
-    sys.exit(app.exec())
+    return app.exec()
 
 
 if __name__ == "__main__":

@@ -165,6 +165,7 @@ class JarvisHandler(BaseHTTPRequestHandler):
 				"local_ip": local_ip,
 				"port": port,
 				"url": f"http://{local_ip}:{port}/",
+				"version": "3.0.0",
 			}
 			# Include remote tunnel URL and permanent URL if available
 			try:
@@ -242,6 +243,18 @@ class JarvisHandler(BaseHTTPRequestHandler):
 		if path == "/api/tts":
 			self._handle_tts(parsed.query)
 			return
+		if path == "/api/files/list":
+			try:
+				from urllib.parse import parse_qs
+				query_params = parse_qs(parsed.query)
+				folder_query = query_params.get("folder", [None])[0]
+				from tools.smart_files import list_project_files
+				res = list_project_files(folder_query)
+				self._send_json(200, res)
+			except Exception as exc:
+				self._send_json(500, {"success": False, "error": str(exc), "files": []})
+			return
+
 		if path == "/api/neural/status":
 			try:
 				from core.continuous_learning import get_continuous_learner
@@ -336,8 +349,8 @@ class JarvisHandler(BaseHTTPRequestHandler):
 		if hasattr(self.manager, "set_remote_active"):
 			self.manager.set_remote_active(True)
 		self.send_response(200)
-		self.send_header("Content-Type", "text/event-stream")
-		self.send_header("Cache-Control", "no-store")
+		self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+		self.send_header("Cache-Control", "no-cache, no-transform, no-store")
 		self.send_header("Access-Control-Allow-Origin", "*")
 		self.send_header("X-Accel-Buffering", "no")
 		self.send_header("Transfer-Encoding", "chunked")
@@ -532,7 +545,7 @@ class JarvisHandler(BaseHTTPRequestHandler):
 				query_params.get("wait", ["false"])[0].lower() in ("true", "1")
 			)
 
-			source = body.get("source", "text")
+			source = body.get("source") or "remote"
 			if hasattr(self.manager, "set_remote_active"):
 				self.manager.set_remote_active(True)
 			if wait_for_response:
@@ -545,20 +558,28 @@ class JarvisHandler(BaseHTTPRequestHandler):
 						except Empty:
 							break
 					self.manager.submit_text(text, source=source)
-					deadline = time.time() + 25.0
+					deadline = time.time() + 35.0
 					response_text = ""
+					streamed_accumulator = ""
 					while time.time() < deadline:
 						remaining = max(0.1, deadline - time.time())
 						try:
 							raw_event = queue.get(timeout=remaining)
 							data = json.loads(raw_event) if isinstance(raw_event, str) else raw_event
-							if data.get("type") == "message" and data.get("role") == "assistant" and data.get("status") == "done" and not data.get("stream"):
-								response_text = data.get("text", "")
-								break
+							if data.get("type") == "message" and data.get("role") == "assistant":
+								msg_status = data.get("status")
+								msg_text = data.get("text", "")
+								if msg_status == "streaming":
+									streamed_accumulator = msg_text
+								elif msg_status == "done":
+									response_text = msg_text or streamed_accumulator
+									break
 						except Empty:
 							break
 					if not response_text:
-						response_text = "Command executed on PC."
+						response_text = streamed_accumulator
+					if not response_text:
+						response_text = "I have processed your request."
 
 					if query_params.get("format", [""])[0] == "text" or "text/plain" in self.headers.get("Accept", ""):
 						body_bytes = response_text.encode("utf-8")
@@ -733,9 +754,13 @@ class JarvisHandler(BaseHTTPRequestHandler):
 							text = normalized
 					source = body.get("source", "remote_voice")
 					print(f"[VOICE] Recognized from client: '{text}'")
-					if body.get("execute", False):
+					# Single-hop voice: execute by default so iOS VAD requires only one round-trip
+					should_execute = body.get("execute", True)
+					if should_execute:
 						self.manager.submit_text(text, source=source)
-					self._send_json(200, {"ok": True, "text": text})
+						self._send_json(200, {"ok": True, "text": text, "executed": True})
+					else:
+						self._send_json(200, {"ok": True, "text": text, "executed": False})
 				else:
 					self._send_json(200, {"ok": True, "text": ""})
 			except Exception as exc:
