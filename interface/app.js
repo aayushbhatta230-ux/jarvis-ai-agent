@@ -1416,26 +1416,38 @@ async function submitVADUtterance(inRate) {
       updateStatusCaption('Listening continuously…');
       resumeContinuousVoice();
     }
-  }, 5000);
+  }, 35000);
 
   const reader = new FileReader();
   reader.onload = async () => {
     clearTimeout(submitVADUtterance._watchdog);
     const base64 = reader.result.split(',')[1];
     try {
-      const res = await postJSON('/api/voice', { audio: base64, mime: 'audio/wav' });
-      const text = (res.text || '').trim();
+      // Single-hop: backend transcribes AND executes in one round-trip.
+      // We deliberately do NOT call handleSpokenCommand here to avoid a second network hop.
+      const res = await postJSON('/api/voice', {
+        audio: base64,
+        mime: 'audio/wav',
+        execute: true,
+        source: 'remote_voice'
+      });
+      const text = (res && res.text ? res.text : '').trim();
       if (text) {
-        handleSpokenCommand(text);
+        showLiveTranscript(`"${text}"`);
+        addMessage('user', text);
+        showCoreResponse(`"${text}"`);
       } else {
         isVoicePaused = false;
         setBodyState('listening');
         updateStatusCaption('Listening continuously…');
+        resumeContinuousVoice();
       }
     } catch(e) {
+      console.warn('[VOICE] Submit failed:', e);
       isVoicePaused = false;
       setBodyState('listening');
       updateStatusCaption('Listening continuously…');
+      resumeContinuousVoice();
     }
   };
   reader.readAsDataURL(wavBlob);

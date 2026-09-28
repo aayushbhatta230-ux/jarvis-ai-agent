@@ -211,6 +211,24 @@ def inspect_and_read_file(target: str, max_chars: int = 12000) -> dict[str, Any]
 
         spoken_response = f"Here is {file_path.name}, sir. {summary}"
 
+        # Park the file as the active working context so follow-up questions
+        # ("what is it about?", "suggest changes") are grounded in real content.
+        try:
+            from core.file_session import get_file_session
+            get_file_session().set(
+                path=str(file_path),
+                name=file_path.name,
+                ext=ext,
+                language=lang,
+                lines=line_count,
+                size_bytes=file_path.stat().st_size,
+                content=content,
+                summary=summary,
+                source="read",
+            )
+        except Exception as session_err:  # noqa: BLE001 - session is advisory
+            print(f"[FILE SESSION] {session_err}")
+
         return {
             "success": True,
             "filename": file_path.name,

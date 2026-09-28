@@ -369,6 +369,32 @@ def execute_remote_action(action: str, **kwargs: Any) -> dict[str, Any]:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    if act in ("open_path", "open_file", "launch_file"):
+        raw_path = kwargs.get("path") or kwargs.get("target") or kwargs.get("file")
+        if not raw_path:
+            return {"ok": False, "error": "No file path specified"}
+        try:
+            import os
+            from pathlib import Path
+            candidate = Path(str(raw_path)).expanduser()
+            if not candidate.is_absolute() or not candidate.exists():
+                # Fall back to smart file resolution across workspace/user dirs
+                from tools.smart_files import find_file
+                resolved = find_file(str(raw_path))
+                if resolved is not None:
+                    candidate = Path(resolved)
+            if not candidate.exists():
+                return {"ok": False, "error": f"File not found: {raw_path}"}
+            os.startfile(str(candidate))
+            return {
+                "ok": True,
+                "action": act,
+                "spoken": f"Opening {candidate.name} on your PC, sir.",
+                "message": f"Opened {candidate.name} on PC",
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # ---------------------------------------------------------
     # 7. Screen Recording
     # ---------------------------------------------------------

@@ -30,12 +30,17 @@ SYSTEM_PROMPT = (
     "Use the capability registry supplied in each request as the source of truth. "
     "Be natural, conversational, concise, and useful. Avoid unnecessary lists, preambles, or theatrical language. "
     "NATURAL VOICE CONVERSATION RULES: "
-    "1. Speak naturally, warmly, and concisely like Tony Stark's JARVIS — with quiet confidence and wit. "
+    "1. Speak naturally, warmly, and concisely like the film character JARVIS — with quiet confidence and wit. "
+    "Your user is Aayush Bhatta (address him as Aayush or sir — never Tony, never Master Tony). "
     "2. For casual conversation, keep responses to 1-2 sentences. "
     "3. For screen descriptions, file contents, or technical questions, give useful detail — describe what you actually see with specifics (app names, tab titles, visible text, button labels). "
     "4. NEVER give long monologues, moral essays, or robotic system narration. "
     "5. When describing the screen, be specific and actionable: name the application, visible tabs, buttons, and text. Don't be vague. "
     "6. When the user asks you to click on something, interact with something, or navigate the UI, identify it precisely from the screen context and act on it. "
+    "7. The user is Aayush Bhatta — address him as Aayush or sir. Never call him Tony or reference Tony Stark as the user. "
+    "FILE WORK: when a FILE CURRENTLY OPEN block is provided, treat its contents as ground truth. "
+    "Answer questions about that file from that content, quote real names (functions, classes, variables) from it, "
+    "and give specific, prioritised improvement suggestions when asked. Never invent file contents."
     "For simple questions, answer directly. For complex requests, reason through the task and use the available capabilities when appropriate."
 )
 
@@ -118,6 +123,14 @@ class Brain:
             return True
         return False
 
+    def _file_context(self) -> str:
+        """Grounding block for the file JARVIS most recently opened."""
+        try:
+            from core.file_session import get_file_session
+            return get_file_session().to_prompt_block()
+        except Exception:
+            return ""
+
     def _build_context(self) -> str:
         """Build the full desktop context when screen perception is required."""
         from core.context import get_desktop_context
@@ -126,6 +139,7 @@ class Brain:
 
         return (
             f"{desktop_ctx}\n"
+            f"{self._file_context()}\n"
             f"Available capabilities:\n{describe_capabilities()}\n"
             f"Private profile: {private_profile_summary()}\n"
             f"{DIRECT_ACTION_CONTRACT}"
@@ -145,12 +159,16 @@ class Brain:
             except Exception:
                 window_hint = ""
             context = (
-                "You are JARVIS, Tony Stark's personal British AI assistant. "
+                "You are JARVIS, Aayush Bhatta's personal British AI assistant. "
+                "Address the user as Aayush or sir — never Tony. "
                 "Speak naturally, warmly, with quiet confidence and wit. "
                 "For casual conversation, keep it to 1-2 concise sentences. "
-                "For technical questions or when the user asks about their PC, give useful specifics. "
+                "For technical questions, questions about the open file, or questions about the user's PC, "
+                "answer with concrete specifics from the context below. "
+                "When a FILE CURRENTLY OPEN block is provided, answer only from that content. "
                 "Never ramble or give moral lectures.\n"
                 f"{window_hint}"
+                f"{self._file_context()}\n"
             )
 
         history_text = ""
@@ -181,43 +199,147 @@ class Brain:
         )
 
     def warm_up(self) -> bool:
-        """Load the model before the first real turn."""
+        """Load the model before the first real turn and keep it resident.
+
+        Uses the raw Ollama HTTP API so the request can carry a long
+        ``keep_alive`` — otherwise Ollama unloads the model after 5 idle minutes
+        and the next command pays a 10-15 second reload penalty.
+        """
 
         try:
-            self._jarvis.ask(
-                "Ready?",
-                model=self.model,
-                max_tokens=1,
-                context=False,
+            import json
+            import urllib.request
+
+            payload = json.dumps({
+                "model": self.model,
+                "prompt": "Ready.",
+                "stream": False,
+                "keep_alive": self.KEEP_ALIVE,
+                "options": {"num_ctx": 512, "num_predict": 1},
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "http://127.0.0.1:11434/api/generate",
+                data=payload,
+                headers={"Content-Type": "application/json"},
             )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                resp.read()
 
             print(
-                f"[BRAIN] OpenJarvis model '{self.model}' warmed up and resident"
+                f"[BRAIN] OpenJarvis model '{self.model}' warmed up and resident "
+                f"(keep_alive={self.KEEP_ALIVE})"
             )
-
+            self.start_keep_alive_heartbeat()
             return True
 
         except Exception as exc:
             print(f"[BRAIN] warm-up skipped: {exc}")
             return False
 
-    def respond(self, prompt: str) -> str:
-        """Generate a complete response through OpenJarvis."""
+    def start_keep_alive_heartbeat(self) -> None:
+        """Refresh the resident model before Ollama's keep-alive expires."""
+        import threading
+
+        def beat() -> None:
+            import json
+            import time
+            import urllib.request
+
+            # Refresh every 4 minutes regardless of activity: a 1-token call
+            # costs well under a second and removes all cold-start latency.
+            while True:
+                time.sleep(240)
+                try:
+                    payload = json.dumps({
+                        "model": self.model,
+                        "prompt": "k",
+                        "stream": False,
+                        "keep_alive": self.KEEP_ALIVE,
+                        "options": {"num_ctx": 256, "num_predict": 1},
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        "http://127.0.0.1:11434/api/generate",
+                        data=payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with urllib.request.urlopen(req, timeout=60) as resp:
+                        resp.read()
+                except Exception:
+                    # Ollama may be restarting; try again next cycle.
+                    pass
+
+        if getattr(self, "_keepalive_thread", None) and self._keepalive_thread.is_alive():
+            return
+        self._keepalive_thread = threading.Thread(
+            target=beat, name="jarvis-keep-alive", daemon=True
+        )
+        self._keepalive_thread.start()
+
+    def respond_fast(self, prompt: str, tokens: int = 90) -> str:
+        """Low-latency answer for short factual questions (no history/RAG)."""
+        query = (
+            "You are JARVIS, a concise personal assistant. "
+            "Answer the user's factual question directly in 1-2 short sentences. "
+            "No preamble, no questions back.\n\n"
+            f"USER: {prompt}\n"
+            "JARVIS:"
+        )
+        try:
+            self._jarvis._ensure_engine()
+            from openjarvis.core.types import Message, Role
+            res = self._jarvis._engine.generate(
+                [Message(role=Role.USER, content=query)],
+                model=self.model,
+                max_tokens=tokens,
+                num_ctx=512,
+            )
+            response = (
+                res.get("content", "")
+                if isinstance(res, dict)
+                else getattr(res, "content", str(res))
+            ).strip()
+        except Exception:
+            response = self._jarvis.ask(
+                query, model=self.model, max_tokens=tokens, context=False
+            ).strip()
+
+        if not response:
+            raise BrainError("The local model returned an empty response.")
+        self.history.extend(
+            [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": response},
+            ]
+        )
+        return response
+
+    def respond(self, prompt: str, tokens: int | None = None) -> str:
+        """Generate a complete response through OpenJarvis.
+
+        ``tokens`` optionally overrides the answer-length budget (used by file
+        reviews and code generation where 180 tokens would truncate the reply).
+        """
 
         try:
             query = self._build_query(prompt)
             # Screen-dependent queries need more tokens for useful descriptions
-            tokens = 280 if self._is_screen_dependent(prompt) else 180
+            if tokens:
+                tokens = int(tokens)
+            else:
+                tokens = 280 if self._is_screen_dependent(prompt) else 180
 
             try:
                 self._jarvis._ensure_engine()
                 from openjarvis.core.types import Message, Role
                 messages = [Message(role=Role.USER, content=query)]
+                # Smaller context window for non-screen prompts: less prompt
+                # evaluation time (roughly halves time-to-first-token).
+                ctx = 2048 if self._is_screen_dependent(prompt) else 1024
                 res = self._jarvis._engine.generate(
                     messages,
                     model=self.model,
                     max_tokens=tokens,
-                    num_ctx=2048,
+                    num_ctx=ctx,
                 )
                 response = (res.get("content", "") if isinstance(res, dict) else getattr(res, "content", str(res))).strip()
             except Exception:
@@ -273,11 +395,12 @@ class Brain:
                 from openjarvis.core.types import Message, Role
                 messages = [Message(role=Role.USER, content=query)]
                 max_tokens = options.get("num_predict", default_tokens)
+                ctx = 2048 if self._is_screen_dependent(prompt) else 1024
                 async for token in self._jarvis._engine.stream(
                     messages,
                     model=self.model,
                     max_tokens=max_tokens,
-                    num_ctx=2048,
+                    num_ctx=ctx,
                 ):
                     token_queue.put(("token", token))
 

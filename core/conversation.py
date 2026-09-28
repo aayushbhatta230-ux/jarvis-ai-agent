@@ -907,6 +907,272 @@ class ConversationManager:
 		print(f"[INTERPRETER] confidence: {corrected.confidence:.2f}")
 		self._append_context(f"User: {text}")
 		return corrected.meaning
+	# ------------------------------------------------------------------ #
+	# Contextual file intelligence: analyse, extract, create
+	# ------------------------------------------------------------------ #
+	_FILENAME_RE = re.compile(r"([A-Za-z0-9_\-]+(?:[/\\][A-Za-z0-9_\-]+)*\.[A-Za-z0-9]{1,8})")
+
+	_ANALYSIS_PATTERNS = (
+		r"analy[sz]e", r"\banalysis\b", r"\breview\b",
+		r"what\s+(?:is|was)\s+(?:this|the|it|that|my)?\s*file\s+about",
+		r"what\s+does\s+(?:this|the|it|that)?\s*file\s+do",
+		r"(?:describe|explain|summarize|summarise|break\s+down|walk\s+me\s+through)\s+(?:this|the|it|that)?\s*file",
+		r"suggest\s+(?:any\s+|some\s+|the\s+)?(?:changes|improvements|edits|fixes|refactors)",
+		r"recommend\s+(?:any\s+|some\s+|the\s+)?(?:changes|improvements|fixes)",
+		r"how\s+(?:can|do|should)\s+(?:i|we)\s+(?:improve|better|fix|clean\s+up)",
+		r"what\s+should\s+i\s+(?:change|improve|fix)",
+		r"what's\s+wrong\s+with\s+(?:this|the|it|that)?\s*file",
+		r"is\s+(?:this|the|it|that)\s+file\s+(?:good|ok|correct|broken)",
+		r"(?:debug|refactor|clean\s+up)\s+(?:this|the|it|that)?\s*file",
+	)
+	_EXTRACT_RE = re.compile(
+		r"^(?:please\s+)?(?:can\s+you\s+)?(?:extract|get|pull|list|find|show|give)\s+"
+		r"(?:me\s+)?(?:all\s+|the\s+)?([a-z]+s?)\s+"
+		r"(?:from|in|of|out\s+of|inside)\s+(?:the\s+|this\s+|that\s+|my\s+|it\s+)?"
+		r"(?:file\s+)?(.*)$"
+	)
+	_CREATE_FILE_RE = re.compile(
+		r"^(?:please\s+)?(?:create|make|write|generate|new|build)\s+(?:a\s+|an\s+)?(?:new\s+)?"
+		r"(file|script|document|python\s+file|javascript\s+file|html\s+file|text\s+file|note)"
+		r"\s*(?:named|called|with\s+(?:the\s+)?name)?\s*[\"']?([^\s\"']+\.[A-Za-z0-9]{1,8})"
+		r"[\"']?\s*(.*)$"
+	)
+	_CREATE_FOLDER_RE = re.compile(
+		r"^(?:please\s+)?(?:create|make|new)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:folder|directory)"
+		r"\s*(?:named|called|with\s+(?:the\s+)?name)?\s*[\"']?(.+?)[\"']?$"
+	)
+
+	def _resolve_file_target(self, lower_clean: str, transcript: str) -> tuple[str | None, bool]:
+		"""Return (target, explicit) for file actions.
+
+		``explicit`` is True when the user actually named a file, False when the
+		target came from JARVIS's active file session (follow-up phrasing such as
+		"this file", "it", "that").
+		"""
+		from core.file_session import get_file_session
+
+		session = get_file_session()
+		match = self._FILENAME_RE.search(transcript) or self._FILENAME_RE.search(lower_clean)
+		if match:
+			return match.group(1), True
+		if session.is_active():
+			info = session.snapshot()
+			return info["name"], False
+		return None, False
+
+	def _file_intelligence(self, lower_clean: str, transcript: str) -> str | None:
+		"""Analyse, extract from, or create files — grounded in real content."""
+		from pathlib import Path
+
+		# ---------------- 1. Create a folder ---------------- #
+		folder_match = self._CREATE_FOLDER_RE.match(lower_clean)
+		if folder_match:
+			folder_name = folder_match.group(1).strip().strip("\"'")
+			if folder_name and " " not in folder_name.strip():
+				from tools.files import create_folder
+				return create_folder(folder_name)
+			# Multi-word folder names still work if they look like a path/name
+			if folder_name:
+				from tools.files import create_folder
+				return create_folder(folder_name.replace(" ", "_"))
+
+		# ---------------- 2. Create a file ---------------- #
+		file_match = self._CREATE_FILE_RE.match(lower_clean)
+		if file_match:
+			return self._create_file_action(
+				file_match.group(2).strip().strip("\"'"),
+				file_match.group(3).strip(),
+				transcript,
+			)
+
+		# ---------------- 3. Extract structured data ---------------- #
+		extract_match = self._EXTRACT_RE.match(lower_clean)
+		if extract_match:
+			kind = extract_match.group(1).rstrip("s") + ("s" if extract_match.group(1).endswith("s") else "")
+			remainder = extract_match.group(2).strip()
+			# "…from this file / it / that" resolves through the session
+			uses_session = bool(re.search(r"^(?:this|the|that|it|current)?\s*file\.?$|^it\.?$|^that\.?$", remainder))
+			if remainder and (uses_session or self._FILENAME_RE.search(remainder) or not remainder):
+				target = remainder if self._FILENAME_RE.search(remainder) else None
+				if target is None:
+					target, _ = self._resolve_file_target(lower_clean, transcript)
+				if target:
+					from tools.file_analysis import extract_from_file, EXTRACT_KINDS
+					if kind in EXTRACT_KINDS or kind.rstrip("s") in EXTRACT_KINDS:
+						res = extract_from_file(target, kind)
+						if res.get("ok"):
+							self._emit_message("assistant", res["display"])
+							return res["spoken"]
+						return res.get("spoken")
+		# Second extraction form: "extract functions from test_dom.js" already covered;
+		# also allow "functions from the open file" phrasing without "extract".
+		if re.match(r"^(?:list|show|get|find)\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?", lower_clean) and re.search(
+			r"(?:from|in)\s+(?:this|the|it|that)\s+file", lower_clean
+		):
+			kind_match = re.search(
+				r"\b(functions?|classes?|imports?|urls?|links?|emails?|headings?|todos?|fixmes?|comments?|constants?|paths?)\b",
+				lower_clean,
+			)
+			if kind_match:
+				target, _ = self._resolve_file_target(lower_clean, transcript)
+				if target:
+					from tools.file_analysis import extract_from_file
+					res = extract_from_file(target, kind_match.group(1))
+					if res.get("ok"):
+						self._emit_message("assistant", res["display"])
+						return res["spoken"]
+					return res.get("spoken")
+
+		# ---------------- 4. Analyse / review / "what is it about" ---------------- #
+		wants_analysis = any(re.search(p, lower_clean) for p in self._ANALYSIS_PATTERNS)
+		if wants_analysis:
+			target, explicit = self._resolve_file_target(lower_clean, transcript)
+			if target:
+				return self._analyse_file_action(target, transcript, wants_suggestions=bool(re.search(
+					r"suggest|recommend|improve|improvement|change|fix|wrong|refactor|better|debug|clean\s+up|good|broken",
+					lower_clean,
+				)))
+			# No file open and none named → let the companion path answer naturally.
+			if explicit:
+				return None
+		return None
+
+	def _analyse_file_action(self, target: str, transcript: str, wants_suggestions: bool = False) -> str:
+		"""Grounded file analysis; optionally adds a model-written code review."""
+		from tools.file_analysis import analyze_file
+
+		res = analyze_file(target)
+		if not res.get("ok"):
+			return res.get("spoken", "I couldn't analyse that file.")
+
+		display = res["display"]
+		spoken = res["spoken"]
+
+		if wants_suggestions and res.get("content"):
+			content = res["content"]
+			stats = res.get("stats", {})
+			if len(content) > 3000:
+				content = content[:3000] + f"\n... (truncated; file has {stats.get('lines', 0)} lines total)"
+			prompt = (
+				f"You are reviewing code for {res['filename']}.\n"
+				f"Purpose (inferred): {res['purpose']}\n"
+				f"Metrics: {stats.get('lines', 0)} lines, {stats.get('functions', 0)} functions, "
+				f"{stats.get('classes', 0)} classes, {stats.get('todos', 0)} TODOs.\n"
+				f"Detected findings: {'; '.join(res.get('issues', [])) or 'none'}\n\n"
+				f"FILE CONTENT:\n```\n{content}\n```\n\n"
+				f"User request: \"{transcript}\"\n"
+				"Give exactly 3-5 specific, prioritised improvements. For each: one short heading, "
+				"what is wrong, and the concrete change to make (name real functions/variables from the file). "
+				"Keep the whole answer under 140 words. No preamble."
+			)
+			try:
+				advice = self.brain.respond(prompt, tokens=320)
+			except Exception as review_err:
+				print(f"[FILE REVIEW] {review_err}")
+				advice = ""
+			if advice:
+				clean = advice.replace("```", "").strip()
+				display += "\n\n**Model review**\n\n" + clean
+				first_sentences = ". ".join(clean.split(". ")[:2])
+				spoken = f"{res['filename']} analysed. {first_sentences}"
+				if not spoken.rstrip().endswith("."):
+					spoken += "."
+
+		self._emit_message("assistant", display)
+		return spoken
+
+	def _create_file_action(self, filename: str, rest: str, transcript: str) -> str:
+		"""Create a file (generating its code when only a requirement is given)."""
+		from pathlib import Path
+
+		from tools.files import create_file
+
+		# Destination: explicit path honoured, otherwise the Desktop so the
+		# user immediately sees the new file.
+		if re.match(r"^[A-Za-z]:[/\\]|^~|^[/\\]|^\.{1,2}[/\\]", filename) or "/" in filename or "\\" in filename:
+			path = Path(filename).expanduser()
+		else:
+			desktop = Path.home() / "Desktop"
+			try:
+				desktop.mkdir(parents=True, exist_ok=True)
+			except Exception:
+				desktop = Path.cwd()
+			path = desktop / filename
+
+		# Inline content: "…with content: …" / "…containing …"
+		content = ""
+		inline = re.search(r"(?:with|containing)\s+(?:the\s+)?(?:following\s+)?(?:content\s*)?[:=]?\s*(.+)$", rest)
+		desc = ""
+		if inline:
+			content = inline.group(1).strip().strip("\"'")
+		elif rest:
+			desc = re.sub(
+				r"^(?:that|which|which\s+should|to|for)\s+",
+				"",
+				rest.strip().strip("\"'"),
+			).strip()
+
+		if not content and desc:
+			lang_hint = ""
+			ext = path.suffix.lower()
+			if ext == ".py":
+				lang_hint = "Python"
+			elif ext in (".js", ".ts"):
+				lang_hint = "JavaScript"
+			elif ext in (".html", ".htm"):
+				lang_hint = "HTML"
+			elif ext == ".md":
+				lang_hint = "Markdown"
+			elif ext in (".c", ".cpp"):
+				lang_hint = "C/C++"
+			gen = (
+				f"Write the complete contents of a {lang_hint or 'text'} file named '{path.name}'.\n"
+				f"Requirement: {desc}\n"
+				"Return ONLY the raw file contents — no markdown fences, no explanations."
+			)
+			try:
+				generated = self.brain.respond(gen, tokens=400)
+			except Exception as gen_err:
+				print(f"[FILE CREATE] code generation failed: {gen_err}")
+				generated = ""
+			if generated:
+				content = generated.strip()
+				content = re.sub(r"^```[a-zA-Z]*\n", "", content)
+				content = re.sub(r"\n```$", "", content).strip()
+
+		msg = create_file(str(path), content)
+		if msg.startswith("I couldn't"):
+			return msg
+
+		line_count = len(content.splitlines()) if content else 0
+		try:
+			from core.file_session import get_file_session
+			if content:
+				from tools.file_analysis import describe_purpose
+				get_file_session().set(
+					path=str(path),
+					name=path.name,
+					ext=path.suffix.lower(),
+					language=path.suffix.lstrip(".").lower() or "text",
+					lines=line_count,
+					size_bytes=path.stat().st_size if path.exists() else 0,
+					content=content,
+					summary=describe_purpose(path.suffix.lower(), content, path.name),
+					source="create",
+				)
+		except Exception as session_err:  # noqa: BLE001 - advisory only
+			print(f"[FILE SESSION] {session_err}")
+
+		detail = f" with {line_count} lines of code" if line_count else ""
+		self._emit_message(
+			"assistant",
+			f"✅ **Created `{path.name}`**\n\n📍 `{path}`{(' — ' + str(line_count) + ' lines') if line_count else ''}\n\n"
+			+ ("```" + (path.suffix.lstrip('.') or "text") + "\n" + content[:1500] + "\n```" if content else "_empty file_"),
+		)
+		return f"Created {path.name} at {path}{detail}, sir. It is now open in my working memory — ask me to review it any time."
+
+
+
 
 	def _quick_response(self, transcript: str) -> str | None:
 		"""Answer latency-sensitive social and profile checks without an LLM trip."""
@@ -1515,6 +1781,53 @@ class ConversationManager:
 			if c_res.get("display"):
 				self._emit_message("assistant", c_res["display"])
 			return c_res.get("spoken", "Committed and pushed to GitHub, sir.")
+
+		# 4i0. Contextual file intelligence (analyse / extract / create) —
+		# runs before web research so file questions never hit the network.
+		file_intel = self._file_intelligence(lower_clean, transcript)
+		if file_intel is not None:
+			return file_intel
+
+		# 4i-1. Fast local knowledge for simple factual questions.
+		# The web-research path pays a 3s DuckDuckGo timeout before falling back,
+		# which made trivial questions ("capital of Nepal") take ~11s. Answering
+		# with the resident model takes ~1-2s.
+		live_markers = (
+			"latest", "today", "right now", "currently", "news", "weather", "stock",
+			"price", "score", "won", "forecast", "2026", "2025", "exchange rate",
+			"tomorrow", "this week", "now",
+		)
+		web_markers = (
+			"search the web", "search online", "google", "deep research",
+			"web research", "research ", "look up on the web", "browse the web",
+		)
+		knowledge_blocked = (
+			"file", "screen", "clipboard", "timer", "note", "git", "volume",
+			"download", "folder", "directory", "music", "window", "tab", "app",
+			"open ", "launch", "start ", "create", "play", "turn on", "install",
+			"run ", "set up", "my name", "who are you",
+		)
+		is_knowledge = bool(re.search(
+			r"^(?:what\s+(?:is|was|are)|what's|who\s+(?:is|was)|where\s+is|where\s+was|"
+			r"when\s+(?:is|was|did)|why\s+(?:is|was|do|does)|how\s+(?:do|does|did|is|are)|"
+			r"define|explain|capital\s+of|meaning\s+of)\s+",
+			lower_clean,
+		))
+		if (
+			is_knowledge
+			and len(lower_clean) <= 90
+			and not any(w in lower_clean for w in live_markers)
+			and not any(w in lower_clean for w in web_markers)
+			and not any(w in lower_clean for w in knowledge_blocked)
+		):
+			try:
+				fast_answer = self.brain.respond_fast(transcript)
+			except Exception as fast_err:
+				print(f"[FAST KNOWLEDGE] {fast_err}")
+				fast_answer = ""
+			if fast_answer:
+				self._emit_message("assistant", fast_answer)
+				return fast_answer
 
 		# 4i. Live Deep Web & Knowledge Research
 		research_match = re.search(r"^(?:research|look\s+up|search\s+for|tell\s+me\s+about|who\s+was|who\s+is|what\s+is|define)\s+(.+)$", lower_clean)
@@ -2174,6 +2487,13 @@ class ConversationManager:
 		# Include the action result so the brain knows what was just executed
 		# and doesn't ask the user to repeat themselves.
 		action_line = f"Action just executed: {action_result}" if action_result else ""
+		file_block = ""
+		try:
+			from core.file_session import get_file_session
+			file_block = get_file_session().to_prompt_block(max_chars=2600)
+		except Exception:
+			file_block = ""
+		file_line = file_block if file_block else ""
 
 		return (
 			"Respond as a personal companion, not a command parser.\n"
@@ -2184,15 +2504,19 @@ class ConversationManager:
 			f"Relevant recent context: {context}\n"
 			f"{reference_line}\n"
 			f"{action_line}\n"
+			f"{file_line}\n"
 			f"Long-term preference evidence: {preference_text}\n"
 			f"Saved user facts: {facts}\n"
 			f"Current media state: {media_status}\n"
 			f"Confirmation status: {confirmation}.\n"
+			"When the FILE CURRENTLY OPEN block above is present, treat it as ground truth: "
+			"answer questions about that file only from its contents, quote real identifiers "
+			"from it, and give concrete prioritised improvement suggestions when asked. "
 			"Use the likely meaning without forcing the user to repeat an exact command. "
-			"When the user says 'that', 'it', 'the file', etc., resolve it from the Last action "
-			"and Recent file/target above. Never ask 'which one?' when the referent is clear. "
-			f"For a simple request or greeting, answer in {length}. Do not narrate "
-			"microphones, audio processing, internal states, or assistant architecture. "
+			"When the user says 'that', 'it', 'the file', etc., resolve it from the Last action, "
+			"Recent file/target, and FILE CURRENTLY OPEN blocks above. Never ask 'which one?' when the referent is clear. "
+			f"For a simple request or greeting, answer in {length}. Address the user as Aayush or sir — never Tony. "
+			"Do not narrate microphones, audio processing, internal states, or assistant architecture. "
 			"Only give a longer answer when the user explicitly asks for an explanation."
 		)
 
