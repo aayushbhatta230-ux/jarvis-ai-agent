@@ -398,6 +398,17 @@ let lastSpokenPhoneText = '';
 let lastSpokenPhoneTime = 0;
 let greetingSpoken = false;
 let audioUnlocked = false;
+let phoneAudioCtx = null;
+
+function getPhoneAudioContext() {
+  if (!phoneAudioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) {
+      phoneAudioCtx = new AudioContextClass();
+    }
+  }
+  return phoneAudioCtx;
+}
 
 function getPhoneAudioPlayer() {
   let player = document.getElementById('phoneAudioPlayer');
@@ -413,6 +424,24 @@ function getPhoneAudioPlayer() {
 }
 
 function unlockAudio() {
+  try {
+    const ctx = getPhoneAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  } catch (_) {}
+
+  try {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.resume();
+      if (!audioUnlocked) {
+        const dummy = new SpeechSynthesisUtterance(' ');
+        dummy.volume = 0.01;
+        window.speechSynthesis.speak(dummy);
+      }
+    }
+  } catch (_) {}
+
   if (audioUnlocked) return;
   audioUnlocked = true;
 
@@ -424,22 +453,8 @@ function unlockAudio() {
       p.then(() => { player.pause(); }).catch(() => {});
     }
   } catch (_) {}
-
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (AudioContextClass) {
-    try {
-      const ctx = new AudioContextClass();
-      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    } catch (_) {}
-  }
-
-  try {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.resume();
-    }
-  } catch (_) {}
 }
-['touchstart', 'touchend', 'click', 'keydown'].forEach(evt => {
+['touchstart', 'touchend', 'click', 'keydown', 'pointerdown'].forEach(evt => {
   document.addEventListener(evt, unlockAudio, { passive: true });
 });
 
@@ -538,6 +553,42 @@ class StreamingSpeechQueue {
     showCoreResponse(nextSentence);
 
     const ttsUrl = '/api/tts?text=' + encodeURIComponent(nextSentence) + '&voice=en-GB-RyanNeural';
+
+    // Prefer Web Audio API decoding: works asynchronously on iOS Safari once AudioContext is resumed
+    const ctx = getPhoneAudioContext();
+    if (ctx) {
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      fetch(ttsUrl)
+        .then(res => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.arrayBuffer();
+        })
+        .then(buf => ctx.decodeAudioData(buf))
+        .then(audioBuf => {
+          if (!this.isPlaying) return;
+          const srcNode = ctx.createBufferSource();
+          srcNode.buffer = audioBuf;
+          srcNode.connect(ctx.destination);
+          this.currentSourceNode = srcNode;
+          srcNode.onended = () => {
+            this.currentSourceNode = null;
+            this.playNext();
+          };
+          srcNode.start(0);
+        })
+        .catch(err => {
+          console.warn('[STREAMING TTS WebAudio] playback issue, fallback:', err);
+          this._playWithAudioTag(ttsUrl, nextSentence);
+        });
+      return;
+    }
+
+    this._playWithAudioTag(ttsUrl, nextSentence);
+  }
+
+  _playWithAudioTag(ttsUrl, nextSentence) {
     try {
       this.player.pause();
       this.player.src = ttsUrl;
@@ -561,6 +612,10 @@ class StreamingSpeechQueue {
     this.isPlaying = false;
     this.currentText = '';
     this.streamSpokenIndex = 0;
+    if (this.currentSourceNode) {
+      try { this.currentSourceNode.stop(); } catch(_) {}
+      this.currentSourceNode = null;
+    }
     try {
       this.player.pause();
       this.player.currentTime = 0;
@@ -623,6 +678,7 @@ function fallbackSpeechSynthesis(clean, onFinishCallback) {
   }
   try {
     window.speechSynthesis.cancel();
+    window.speechSynthesis.resume();
     const u = new SpeechSynthesisUtterance(clean);
     u.rate = 1.05;
     u.pitch = 1.0;
@@ -790,6 +846,10 @@ function connectEvents() {
     if (p.type === 'state') { setBodyState(p.state); return; }
     if (p.type === 'file_view') {
       showCoreResponse(`Opened ${p.filename} (${p.lines} lines)`);
+      if (typeof showFileViewer === 'function') {
+        switchView('files');
+        showFileViewer(p);
+      }
       return;
     }
     if (p.type === 'message') { handleBackendMessage(p); return; }
@@ -845,7 +905,7 @@ async function interrupt() {
   catch(e) { toast('Interrupt failed.', true); }
 }
 
-async function sendCommand(text, source = 'text') {
+async function sendCommand(text, source = 'remote') {
   const clean = (text || '').trim();
   if (!clean) return;
   if (commandInput) commandInput.value = '';
@@ -880,17 +940,21 @@ async function sendCommand(text, source = 'text') {
   }, 6500);
 
   try {
-    // When SSE is connected, fire-and-forget (SSE delivers the response).
-    // When SSE is down, use synchronous wait as fallback.
+    // When SSE is connected, fire-and-forget so SSE streams tokens and audio immediately with zero delay.
+    // When SSE is disconnected, use synchronous wait as fallback.
     const shouldWait = !app.connected || !eventSource || eventSource.readyState !== EventSource.OPEN;
     const res = await postJSON('/api/command', { text: clean, source, wait: shouldWait });
 
     if (shouldWait && res && res.response) {
       clearTimeout(sendCommand._watchdog);
       const respText = res.response.trim();
-      addMessage('assistant', respText);
-      showCoreResponse(respText);
-      speakOnPhone(respText);
+      const lastMsg = messagesEl ? messagesEl.querySelector('.message.assistant:last-child') : null;
+      const lastText = lastMsg ? (lastMsg.textContent || '').trim() : '';
+      if (!lastText.includes(respText.slice(0, 30)) && !respText.toLowerCase().includes('command executed on pc')) {
+        addMessage('assistant', respText);
+        showCoreResponse(respText);
+        speakOnPhone(respText);
+      }
       setBodyState('listening');
       updateStatusCaption('Listening continuously…');
     }
@@ -1521,6 +1585,9 @@ function switchView(viewName) {
   if (viewName === 'screen') {
     startLiveMirror();
     refreshDesktopTabs();
+  }
+  if (viewName === 'files') {
+    loadFiles();
   }
   if (viewName === 'brain') setTimeout(resizeCore, 40);
 }
@@ -3249,3 +3316,201 @@ async function loadHistory() {
     });
   } catch(e){}
 }
+
+/* ------------------------------------------------------------------ */
+/* VIEW 5: FILES EXPLORER & VIEWER                                     */
+/* ------------------------------------------------------------------ */
+const filesFolderChips = document.getElementById('filesFolderChips');
+const filesSearchInput = document.getElementById('filesSearchInput');
+const filesListContainer = document.getElementById('filesListContainer');
+const filesCountBadge = document.getElementById('filesCountBadge');
+const btnRefreshFiles = document.getElementById('btnRefreshFiles');
+const btnBackFromFiles = document.getElementById('btnBackFromFiles');
+const fileViewerCard = document.getElementById('fileViewerCard');
+const fileViewerName = document.getElementById('fileViewerName');
+const fileViewerSub = document.getElementById('fileViewerSub');
+const fileViewerSummary = document.getElementById('fileViewerSummary');
+const fileViewerCode = document.getElementById('fileViewerCode');
+const btnCopyFileContent = document.getElementById('btnCopyFileContent');
+const btnOpenFileOnPC = document.getElementById('btnOpenFileOnPC');
+const btnCloseFileViewer = document.getElementById('btnCloseFileViewer');
+
+const FILE_EXT_ICON = {
+  '.py': '\u{1F40D}', '.js': '\u{1F4C1}', '.ts': '\u{1F4C1}', '.json': '\u{1F4C6}',
+  '.html': '\u{1F310}', '.css': '\u{1F3A8}', '.md': '\u{1F4DD}', '.txt': '\u{1F4C4}',
+  '.pdf': '\u{1F4C1}', '.csv': '\u{1F4CA}'
+};
+
+let filesCache = [];
+let filesCurrentFolder = '';
+let filesCurrentFile = null;
+
+function fileIconFor(ext) {
+  return FILE_EXT_ICON[(ext || '').toLowerCase()] || '\u{1F4C1}';
+}
+
+function formatFileSize(bytes) {
+
+function renderFilesList() {
+  if (!filesListContainer) return;
+  const q = (filesSearchInput && filesSearchInput.value ? filesSearchInput.value : '').trim().toLowerCase();
+  const items = q
+    ? filesCache.filter(f => (f.name || '').toLowerCase().includes(q) || (f.rel_path || '').toLowerCase().includes(q))
+    : filesCache;
+
+  if (filesCountBadge) filesCountBadge.textContent = `${items.length} file${items.length === 1 ? '' : 's'}`;
+
+  if (!items.length) {
+    filesListContainer.innerHTML = `<div class="files-empty-state">${q ? 'No files match that filter.' : 'No files found here.'}</div>`;
+    return;
+  }
+
+  filesListContainer.innerHTML = '';
+  items.forEach(f => {
+    const card = document.createElement('div');
+    card.className = 'file-item-card';
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+
+    const left = document.createElement('div');
+    left.className = 'file-item-left';
+    const icon = document.createElement('span');
+    icon.className = 'file-item-icon';
+    icon.textContent = fileIconFor(f.ext);
+    const info = document.createElement('div');
+    info.className = 'file-item-info';
+    const name = document.createElement('span');
+    name.className = 'file-item-name';
+    name.textContent = f.rel_path || f.name;
+    const meta = document.createElement('span');
+    meta.className = 'file-item-meta';
+    meta.textContent = `${formatFileSize(f.size_bytes)}${f.ext ? ' • ' + f.ext : ''}`;
+    info.append(name, meta);
+    left.append(icon, info);
+
+    const readBtn = document.createElement('button');
+    readBtn.type = 'button';
+    readBtn.className = 'file-item-read-btn';
+    readBtn.textContent = 'Open';
+
+    card.append(left, readBtn);
+
+    const open = (ev) => { if (ev) ev.stopPropagation(); openFileFromExplorer(f.name); };
+    card.addEventListener('click', open);
+    readBtn.addEventListener('click', open);
+    card.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } });
+
+    filesListContainer.appendChild(card);
+  });
+}
+
+  const b = Number(bytes) || 0;
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${Math.max(1, Math.round(b / 1024))} KB`;
+
+async function loadFiles(folder) {
+  if (folder !== undefined) filesCurrentFolder = folder || '';
+  if (filesListContainer) filesListContainer.innerHTML = '<div class="files-empty-state">Loading files…</div>';
+  try {
+    const qs = filesCurrentFolder ? `?folder=${encodeURIComponent(filesCurrentFolder)}` : '';
+    const res = await getJSON(`/api/files/list${qs}`);
+    filesCache = (res && res.files) ? res.files : [];
+    renderFilesList();
+  } catch (e) {
+    console.warn('[FILES] list failed', e);
+    filesCache = [];
+    if (filesListContainer) filesListContainer.innerHTML = '<div class="files-empty-state">Could not reach JARVIS for file listing.</div>';
+  }
+}
+
+function showFileViewer(data) {
+  if (!fileViewerCard) return;
+  filesCurrentFile = data;
+  if (fileViewerName) fileViewerName.textContent = data.filename || '';
+  if (fileViewerSub) {
+    const lang = data.language || data.ext || 'text';
+    const size = data.size_bytes ? formatFileSize(data.size_bytes) : '';
+    fileViewerSub.textContent = `${lang} • ${data.lines || 0} lines${size ? ' • ' + size : ''}`;
+  }
+  if (fileViewerSummary) {
+    if (data.summary) { fileViewerSummary.textContent = data.summary; fileViewerSummary.hidden = false; }
+    else { fileViewerSummary.textContent = ''; fileViewerSummary.hidden = true; }
+  }
+  if (fileViewerCode) fileViewerCode.textContent = data.content || '(empty file)';
+  fileViewerCard.hidden = false;
+  try { fileViewerCard.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+}
+
+function hideFileViewer() {
+  if (fileViewerCard) fileViewerCard.hidden = true;
+  filesCurrentFile = null;
+}
+
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+
+async function openFileFromExplorer(name) {
+  if (!name) return;
+  showCoreResponse(`Opening ${name}…`);
+  try {
+    const res = await postJSON('/api/files/read', { target: name });
+    if (res && res.success) {
+      switchView('files');
+      showFileViewer(res);
+      addMessage('assistant', res.display || `Opened **${res.filename}**`);
+    } else {
+      toast((res && res.error) || 'Could not read that file.', true);
+    }
+  } catch (e) {
+    toast('File read failed.', true);
+  }
+}
+
+if (filesFolderChips) {
+  filesFolderChips.addEventListener('click', (ev) => {
+    const chip = ev.target.closest('.folder-chip');
+    if (!chip) return;
+    filesFolderChips.querySelectorAll('.folder-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    hideFileViewer();
+    loadFiles(chip.dataset.folder || '');
+  });
+}
+if (filesSearchInput) filesSearchInput.addEventListener('input', renderFilesList);
+
+if (btnCopyFileContent) {
+  btnCopyFileContent.addEventListener('click', async () => {
+    if (!filesCurrentFile) return;
+    const text = filesCurrentFile.content || '';
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('File content copied.');
+    } catch (_) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        toast('File content copied.');
+      } catch (__) { toast('Copy failed.', true); }
+    }
+  });
+}
+
+if (btnOpenFileOnPC) {
+  btnOpenFileOnPC.addEventListener('click', async () => {
+    if (!filesCurrentFile) return;
+    try {
+      await postJSON('/api/remote/control', { action: 'open_path', path: filesCurrentFile.path });
+      toast('Opening on PC…');
+    } catch (e) { toast('Could not open on PC.', true); }
+  });
+}
+
+if (btnRefreshFiles) btnRefreshFiles.addEventListener('click', () => { hideFileViewer(); loadFiles(); });
+if (btnBackFromFiles) btnBackFromFiles.addEventListener('click', () => switchView('brain'));
+if (btnCloseFileViewer) btnCloseFileViewer.addEventListener('click', hideFileViewer);
+
+}
+
