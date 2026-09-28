@@ -30,7 +30,13 @@ def open_url(url: str) -> str:
 	attach_desktop()
 
 	opened = False
-	if getattr(webbrowser.open, "__name__", "") != "open":
+	try:
+		os.startfile(clean)
+		opened = True
+	except Exception:
+		pass
+
+	if not opened:
 		try:
 			webbrowser.open(clean)
 			opened = True
@@ -41,7 +47,7 @@ def open_url(url: str) -> str:
 		for p in (CHROME_PATH, CHROME_X86):
 			if os.path.isfile(p):
 				try:
-					subprocess.Popen([p, clean])
+					subprocess.Popen(["cmd.exe", "/c", "start", "", p, clean], shell=False)
 					opened = True
 					break
 				except Exception:
@@ -49,20 +55,16 @@ def open_url(url: str) -> str:
 
 	if not opened:
 		try:
-			os.startfile(clean)
+			subprocess.Popen(["cmd.exe", "/c", "start", "", clean], shell=False)
 			opened = True
-		except Exception:
-			try:
-				webbrowser.open(clean)
-				opened = True
-			except Exception as exc:
-				raise RuntimeError(f"Could not open browser URL: {exc}")
+		except Exception as exc:
+			raise RuntimeError(f"Could not open browser URL: {exc}")
 
 	# Force the browser to the foreground so the user actually sees it!
-	for _ in range(4):
-		time.sleep(0.15)
+	for _ in range(5):
+		time.sleep(0.2)
 		attach_desktop()
-		found, _ = focus_window_by_keyword("chrome", "google chrome", "edge", "browser", "firefox", "brave")
+		found, _ = focus_window_by_keyword("chrome", "google chrome", "edge", "microsoft edge", "browser", "firefox", "brave")
 		if found:
 			break
 
