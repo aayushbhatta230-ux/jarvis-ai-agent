@@ -926,8 +926,8 @@ async function sendCommand(text, source = 'remote') {
   isVoicePaused = true;
   pauseContinuousVoice();
 
-  // Watchdog: If for any reason JARVIS stays in 'processing' or 'understanding'
-  // for more than 6.5s without speech, auto-recover to listening.
+  // Watchdog: Allow up to 35 seconds for LLM responses (Ollama local inference)
+  // before auto-recovering to listening state.
   clearTimeout(sendCommand._watchdog);
   sendCommand._watchdog = setTimeout(() => {
     if (app.state === 'processing' || app.state === 'understanding' || app.state === 'speaking') {
@@ -937,12 +937,14 @@ async function sendCommand(text, source = 'remote') {
       isVoicePaused = false;
       resumeContinuousVoice();
     }
-  }, 6500);
+  }, 35000);
 
   try {
-    // When SSE is connected, fire-and-forget so SSE streams tokens and audio immediately with zero delay.
-    // When SSE is disconnected, use synchronous wait as fallback.
-    const shouldWait = !app.connected || !eventSource || eventSource.readyState !== EventSource.OPEN;
+    // For mobile/remote clients or Cloudflare tunnels, SSE chunked buffering can delay or drop
+    // stream chunks. Always use wait:true for remote/phone sources so we get a reliable synchronous
+    // reply, while keeping SSE for live streaming when available.
+    const isRemoteSource = (source === 'remote' || source === 'remote_voice' || source === 'phone');
+    const shouldWait = isRemoteSource || !app.connected || !eventSource || eventSource.readyState !== EventSource.OPEN;
     const res = await postJSON('/api/command', { text: clean, source, wait: shouldWait });
 
     if (shouldWait && res && res.response) {
