@@ -538,6 +538,8 @@ class StreamingSpeechQueue {
         setBodyState('listening');
         updateStatusCaption('Listening continuously…');
       }
+      // Queue drained: always re-arm the mic (also clears any lingering turn watchdog).
+      endVoiceTurn();
       setTimeout(resumeContinuousVoice, 150);
       return;
     }
@@ -928,16 +930,9 @@ async function sendCommand(text, source = 'remote') {
 
   // Watchdog: Allow up to 35 seconds for LLM responses (Ollama local inference)
   // before auto-recovering to listening state.
-  clearTimeout(sendCommand._watchdog);
-  sendCommand._watchdog = setTimeout(() => {
-    if (app.state === 'processing' || app.state === 'understanding' || app.state === 'speaking') {
-      console.log('[WATCHDOG] Auto-recovering from stuck state:', app.state);
-      setBodyState('listening');
-      updateStatusCaption('Listening continuously…');
-      isVoicePaused = false;
-      resumeContinuousVoice();
-    }
-  }, 35000);
+  // Turn generation: guarantees the mic always comes back, even on failure.
+  const turnToken = ++voiceTurnToken;
+  armVoiceTurnWatchdog(turnToken);
 
   try {
     // For mobile/remote clients or Cloudflare tunnels, SSE chunked buffering can delay or drop
@@ -948,7 +943,6 @@ async function sendCommand(text, source = 'remote') {
     const res = await postJSON('/api/command', { text: clean, source, wait: shouldWait });
 
     if (shouldWait && res && res.response) {
-      clearTimeout(sendCommand._watchdog);
       const respText = res.response.trim();
       const lastMsg = messagesEl ? messagesEl.querySelector('.message.assistant:last-child') : null;
       const lastText = lastMsg ? (lastMsg.textContent || '').trim() : '';
@@ -957,24 +951,14 @@ async function sendCommand(text, source = 'remote') {
         showCoreResponse(respText);
         speakOnPhone(respText);
       }
-      setBodyState('listening');
-      updateStatusCaption('Listening continuously…');
     }
   } catch(e) {
     console.warn('Command dispatch error:', e);
-    clearTimeout(sendCommand._watchdog);
     toast('JARVIS not responding.', true);
-    setBodyState('listening');
-    updateStatusCaption('Listening continuously…');
+  } finally {
+    // Never leave the mic paused: hand control to the shared turn lifecycle.
+    endVoiceTurn(turnToken);
   }
-
-  // Always re-check voice state shortly
-  setTimeout(() => {
-    isVoicePaused = false;
-    if (app.state !== 'speaking' && app.state !== 'processing' && app.state !== 'understanding') {
-      resumeContinuousVoice();
-    }
-  }, 800);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1293,6 +1277,8 @@ async function startContinuousVAD() {
     if (btnActivateVoice) btnActivateVoice.hidden = false;
     return false;
   }
+  // Never stack capture graphs: a second getUserMedia on iOS starves the first.
+  if (continuousAudioStream && continuousProcessor) return true;
 
   try {
     continuousAudioStream = await navigator.mediaDevices.getUserMedia({
@@ -1313,6 +1299,7 @@ async function startContinuousVAD() {
     const MAX_PREROLL = 5; // ~420ms pre-speech buffer to preserve initial consonants
 
     continuousProcessor.onaudioprocess = (e) => {
+      lastAudioCallbackAt = performance.now();
       if (isVoicePaused) {
         continuousVADBuffer = [];
         vadIsSpeaking = false;
@@ -1387,6 +1374,53 @@ async function startContinuousVAD() {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* VOICE TURN LIFECYCLE (single source of truth for re-arming the mic) */
+/* ------------------------------------------------------------------ */
+/* Every voice interaction increments voiceTurnToken. Each turn must call
+   endVoiceTurn() exactly once on completion. If a turn somehow never
+   finishes (dropped socket, silent reply, TTS failure), the watchdog
+   force-ends it so continuous listening can never die permanently. */
+let voiceTurnToken = 0;
+let voiceTurnWatchdog = null;
+
+function armVoiceTurnWatchdog(token) {
+  clearVoiceTurnWatchdog();
+  voiceTurnWatchdog = setTimeout(() => {
+    if (token !== voiceTurnToken) return;
+    console.warn('[VOICE] Turn watchdog fired; forcing mic re-arm');
+    endVoiceTurn(token);
+  }, 35000);
+}
+
+function clearVoiceTurnWatchdog() {
+  if (voiceTurnWatchdog) {
+    clearTimeout(voiceTurnWatchdog);
+    voiceTurnWatchdog = null;
+  }
+}
+
+/**
+ * Close out a voice turn and guarantee the mic is listening again.
+ * Safe to call repeatedly and from any exit path.
+ */
+function endVoiceTurn(token, recoverySpeech) {
+  if (token !== undefined && token !== voiceTurnToken) return; // stale turn
+  clearVoiceTurnWatchdog();
+  isVoicePaused = false;
+
+  if (recoverySpeech) {
+    try { speakOnPhone(recoverySpeech); } catch (_) {}
+  }
+
+  if (app.state === 'speaking') return; // TTS still playing; playNext() resumes us
+  if (app.state !== 'processing' && app.state !== 'understanding') {
+    setBodyState('listening');
+  }
+  updateStatusCaption('Listening continuously…');
+  resumeContinuousVoice();
+}
+
 // Package VAD audio into WAV and send to /api/voice
 async function submitVADUtterance(inRate) {
   vadIsSpeaking = false;
@@ -1408,19 +1442,12 @@ async function submitVADUtterance(inRate) {
   setBodyState('processing');
   isVoicePaused = true;
 
-  clearTimeout(submitVADUtterance._watchdog);
-  submitVADUtterance._watchdog = setTimeout(() => {
-    if (app.state === 'processing') {
-      isVoicePaused = false;
-      setBodyState('listening');
-      updateStatusCaption('Listening continuously…');
-      resumeContinuousVoice();
-    }
-  }, 35000);
+  // Turn generation: every exit path must clear this, or the mic stays dead.
+  const turnToken = ++voiceTurnToken;
+  armVoiceTurnWatchdog(turnToken);
 
   const reader = new FileReader();
   reader.onload = async () => {
-    clearTimeout(submitVADUtterance._watchdog);
     const base64 = reader.result.split(',')[1];
     try {
       // Single-hop: backend transcribes AND executes in one round-trip.
@@ -1435,21 +1462,18 @@ async function submitVADUtterance(inRate) {
       if (text) {
         showLiveTranscript(`"${text}"`);
         addMessage('user', text);
-        showCoreResponse(`"${text}"`);
+        // Speak the reply, but never depend on playback finishing to re-arm the mic.
+        speakOnPhone(text);
+        endVoiceTurn(turnToken);
       } else {
-        isVoicePaused = false;
-        setBodyState('listening');
-        updateStatusCaption('Listening continuously…');
-        resumeContinuousVoice();
+        endVoiceTurn(turnToken);
       }
     } catch(e) {
       console.warn('[VOICE] Submit failed:', e);
-      isVoicePaused = false;
-      setBodyState('listening');
-      updateStatusCaption('Listening continuously…');
-      resumeContinuousVoice();
+      endVoiceTurn(turnToken, 'Sorry, I lost that for a second. Try again?');
     }
   };
+  reader.onerror = () => endVoiceTurn(turnToken);
   reader.readAsDataURL(wavBlob);
 }
 
@@ -1462,6 +1486,9 @@ function pauseContinuousVoice() {
   }
   isRecognitionRunning = false;
   if (inputMicBtn) inputMicBtn.classList.remove('listening-active');
+  // Release the VAD capture graph; otherwise iOS keeps the mic hot and the
+  // assistant's own speech leaks back into the next utterance.
+  if (continuousAudioStream) stopContinuousVAD();
 }
 
 // Resume listening when assistant returns to idle
@@ -1489,7 +1516,99 @@ function unlockAndStartContinuousVoice() {
 function initContinuousVoice() {
   if (!checkSecureContext()) return;
   startContinuousRecognition();
+  startVoiceLivenessMonitor();
 }
+
+/* ------------------------------------------------------------------ */
+/* VOICE LIVENESS MONITOR                                              */
+/* ------------------------------------------------------------------ */
+/* iOS Safari suspends the AudioContext and drops the mic track when the
+   app is backgrounded or after long silence. A dead mic looks identical
+   to "listening", so we periodically verify the capture pipeline is
+   actually alive and rebuild it when it is not. */
+let voiceLivenessTimer = null;
+let lastAudioCallbackAt = 0;
+let lastLivenessRepairAt = 0;
+
+function startVoiceLivenessMonitor() {
+  if (voiceLivenessTimer) return;
+  voiceLivenessTimer = setInterval(() => {
+    // Never fight the user or an in-flight turn.
+    if (!continuousVoiceActive || isVoicePaused) return;
+    if (document.hidden) return;
+    if (app.state === 'speaking' || app.state === 'processing' || app.state === 'understanding') return;
+
+    const now = Date.now();
+    // Web Speech path: recognizer should be running.
+    if (!isRecognitionRunning) {
+      repairVoicePipeline(now);
+      return;
+    }
+    // VAD path: audio callbacks should be arriving.
+    if (continuousProcessor && lastAudioCallbackAt) {
+      if (now - lastAudioCallbackAt > 6000) repairVoicePipeline(now);
+    }
+  }, 4000);
+}
+
+function repairVoicePipeline(now) {
+  // Rate-limit repairs so a hard-failure loop cannot thrash the mic.
+  if (now - lastLivenessRepairAt < 8000) return;
+  lastLivenessRepairAt = now;
+  console.warn('[VOICE] Mic appears stalled; restarting capture pipeline');
+
+  try { if (currentSpeechRecognizer) currentSpeechRecognizer.abort(); } catch (_) {}
+  currentSpeechRecognizer = null;
+  isRecognitionRunning = false;
+  stopContinuousVAD();
+
+  isVoicePaused = false;
+  startContinuousRecognition();
+}
+
+/* Fully release the VAD capture graph so iOS can hand back the mic. */
+function stopContinuousVAD() {
+  try {
+    if (continuousProcessor) {
+      continuousProcessor.onaudioprocess = null;
+      if (continuousProcessor.disconnect) continuousProcessor.disconnect();
+    }
+  } catch (_) {}
+  continuousProcessor = null;
+  try {
+    if (continuousAudioStream) {
+      continuousAudioStream.getTracks().forEach(t => t.stop());
+    }
+  } catch (_) {}
+  continuousAudioStream = null;
+  try {
+    if (continuousAudioCtx && continuousAudioCtx.state !== 'closed') continuousAudioCtx.close();
+  } catch (_) {}
+  continuousAudioCtx = null;
+  continuousVADBuffer = [];
+  vadIsSpeaking = false;
+  vadSilenceDurationMs = 0;
+}
+
+// Keep the audio graph alive across iOS interruptions and app switches.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    try { if (continuousAudioCtx && continuousAudioCtx.state === 'running') continuousAudioCtx.suspend(); } catch (_) {}
+    return;
+  }
+  // Returning to the foreground: re-acquire the mic and resume playback context.
+  try {
+    unlockAudio();
+    if (phoneAudioCtx && phoneAudioCtx.state === 'suspended') phoneAudioCtx.resume().catch(() => {});
+  } catch (_) {}
+  if (continuousVoiceActive) {
+    isVoicePaused = false;
+    startContinuousRecognition();
+  }
+});
+window.addEventListener('pageshow', () => {
+  if (continuousVoiceActive) startContinuousRecognition();
+});
 
 // Activation button (visible if user gesture needed)
 if (btnActivateVoice) {
@@ -3528,3 +3647,89 @@ if (btnCloseFileViewer) btnCloseFileViewer.addEventListener('click', hideFileVie
 
 }
 
+
+/* ------------------------------------------------------------------ */
+/* PERSISTENT QUICK CONTROL BAR                                        */
+/* ------------------------------------------------------------------ */
+/* Common controls (volume up/down, media, mute, capture, lock, mic)
+   reachable with one thumb from any view. */
+const qcBar = document.getElementById('quickControlBar');
+const qcVolumeFill = document.querySelector('#qcVolumeLevel i');
+const qcMicBtn = document.getElementById('qcMicBtn');
+let qcVolumeLevel = 50; // optimistic mirror of the PC volume
+
+function setQcVolumeDisplay(pct) {
+  qcVolumeLevel = Math.max(0, Math.min(100, Math.round(pct)));
+  if (qcVolumeFill) qcVolumeFill.style.width = qcVolumeLevel + '%';
+}
+
+function syncQcMicButton() {
+  if (!qcMicBtn) return;
+  const active = continuousVoiceActive && !isVoicePaused;
+  qcMicBtn.classList.toggle('active', active);
+  qcMicBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+}
+
+async function runQuickControl(action) {
+  unlockAudio();
+
+  if (action === 'toggle_mic') {
+    // Delegate to the existing voice toggle so state stays in one place.
+    if (btnVoiceToggle) btnVoiceToggle.click();
+    syncQcMicButton();
+    toast(continuousVoiceActive && !isVoicePaused ? 'Hands-free mic on' : 'Mic paused');
+    return;
+  }
+
+  // Volume is mirrored locally for instant feedback; the PC is the source of truth.
+  if (action === 'volume_up') setQcVolumeDisplay(qcVolumeLevel + 10);
+  if (action === 'volume_down') setQcVolumeDisplay(qcVolumeLevel - 10);
+
+  const labels = {
+    volume_up: 'Volume up',
+    volume_down: 'Volume down',
+    mute: 'Mute toggled',
+    play_pause: 'Play/pause',
+    screenshot: 'Screenshot captured',
+    lock_pc: 'PC locked',
+  };
+
+  try {
+    if (action === 'screenshot') {
+      const res = await postJSON('/api/screenshot/capture', {});
+      if (res && res.url) {
+        addMessage('assistant', 'Screenshot captured.', { image: res.url });
+        if (typeof switchView === 'function') switchView('screen');
+      }
+    } else if (action === 'lock_pc') {
+      if (!confirm('Lock your PC now?')) return;
+      await postJSON('/api/remote/control', { action: 'lock_pc' });
+    } else {
+      await postJSON('/api/remote/control', { action });
+    }
+    toast(labels[action] || 'Done');
+  } catch (e) {
+    toast('Could not reach your PC.', true);
+  }
+}
+
+if (qcBar) {
+  setQcVolumeDisplay(qcVolumeLevel);
+  qcBar.addEventListener('click', (e) => {
+    const btn = e.target.closest('.qc-btn');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const action = btn.dataset.action;
+    if (action) runQuickControl(action);
+  });
+  // Stop taps on the bar from reaching the core-tap handler underneath.
+  qcBar.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+}
+
+// Keep the mic indicator honest as voice state changes.
+if (btnVoiceToggle) {
+  // Poll so the indicator tracks hands-free state without coupling to it.
+  setInterval(syncQcMicButton, 2000);
+  syncQcMicButton();
+}

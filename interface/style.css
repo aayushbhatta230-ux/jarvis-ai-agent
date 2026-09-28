@@ -1763,7 +1763,64 @@ body:has(#screenMaximizedModal[style*="display: flex"]) .bottom-nav-dock {
     height: calc(56px + max(16px, env(safe-area-inset-top, 16px))) !important;
   }
   .bottom-nav-dock {
+    height: calc(62px + env(safe-area-inset-bottom, 0px));
+    padding: 5px 6px env(safe-area-inset-bottom, 5px);
+  }
+  .nav-dock-item {
+    min-width: 0;
+    flex: 1 1 0;
+    padding: 7px 2px;
+    border-radius: 14px;
+  }
+  .nav-dock-icon { font-size: 1.3rem; }
+  .nav-dock-label { font-size: 0.6rem; }
+  .core-container { width: min(62vw, 260px); }
+  .core-chip { min-height: 38px; font-size: 0.74rem; }
+  .command-bar {
+    padding-bottom: 0.4rem;
+    gap: 0.4rem;
+  }
+  .command-bar input {
+    font-size: 1rem; /* >=16px stops iOS Safari auto-zoom on focus */
+    min-height: 46px;
+  }
+  .send-button span { display: none; }
+  .send-button { min-width: 46px; }
+  .messages { padding-bottom: 0.5rem; }
+  .message { font-size: 0.92rem; }
+  .core-container {
+    max-width: 320px !important;
+    max-height: 320px !important;
+  }
+  .btn-floating-exit-mirror {
+    top: max(16px, calc(env(safe-area-inset-top, 16px) + 8px)) !important;
+    right: max(14px, env(safe-area-inset-right, 14px)) !important;
+  }
+  .btn-quick-exit-corner {
+    top: max(16px, calc(env(safe-area-inset-top, 16px) + 8px)) !important;
+    left: max(14px, env(safe-area-inset-left, 14px)) !important;
+  }
+}
 
+/* ==================== MOBILE TOUCH HYGIENE ==================== */
+@media (hover: none) and (pointer: coarse) {
+  /* Kill the 300ms tap delay and grey flash on real touch devices */
+  * { -webkit-tap-highlight-color: transparent; }
+  button, .quick-chip, .core-chip, .nav-dock-item, .folder-chip, .file-card {
+    touch-action: manipulation;
+  }
+  /* Inputs must be >=16px or iOS zooms the whole page on focus */
+  input, textarea, select { font-size: 16px; }
+}
+
+/* Respect users who ask for less motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
 /* =====================================================================
    VIEW 5: FILES EXPLORER & VIEWER STYLES
    ===================================================================== */
@@ -1979,27 +2036,99 @@ body:has(#screenMaximizedModal[style*="display: flex"]) .bottom-nav-dock {
   flex-shrink: 0;
 }
 
-    height: calc(58px + max(16px, env(safe-area-inset-bottom, 16px))) !important;
-    padding-bottom: max(16px, env(safe-area-inset-bottom, 16px)) !important;
-  }
-  .command-bar {
-    margin-bottom: calc(62px + max(16px, env(safe-area-inset-bottom, 16px))) !important;
-  }
-  .core-container {
-    max-width: 320px !important;
-    max-height: 320px !important;
-  }
-  .btn-floating-exit-mirror {
-    top: max(16px, calc(env(safe-area-inset-top, 16px) + 8px)) !important;
-    right: max(14px, env(safe-area-inset-right, 14px)) !important;
-  }
-  .btn-quick-exit-corner {
-    top: max(16px, calc(env(safe-area-inset-top, 16px) + 8px)) !important;
-    left: max(14px, env(safe-area-inset-left, 14px)) !important;
-  }
+/* ==================== PERSISTENT QUICK CONTROL BAR ==================== */
+.quick-control-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  background: rgba(5, 9, 18, 0.86);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid rgba(0, 229, 255, 0.14);
+  z-index: 998;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
+}
+.quick-control-bar::-webkit-scrollbar { display: none; }
+
+.qc-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 229, 255, 0.22);
+  background: rgba(0, 229, 255, 0.07);
+  color: #7fe9ff;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+.qc-btn:active {
+  transform: scale(0.9);
+  background: rgba(0, 229, 255, 0.28);
+  box-shadow: 0 0 14px rgba(0, 229, 255, 0.5);
+}
+.qc-btn.qc-mic.active {
+  background: rgba(0, 229, 255, 0.24);
+  border-color: #00e5ff;
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.45);
+}
+.qc-btn.qc-mic:not(.active) {
+  color: rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
 }
 
-/* ==================== NEURAL & TELEMETRY MODAL ==================== */
+.qc-level {
+  position: relative;
+  flex: 0 0 auto;
+  width: 54px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.qc-level i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 50%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #00e5ff, #7c5cff);
+  transition: width 0.22s ease;
+}
+
+.qc-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.14);
+  margin: 0 0.15rem;
+}
+
+/* Keep the mic/quick bar from covering content */
+.assistant-stage {
+  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+/* Hide the quick bar while the fullscreen mirror is open */
+body:has(#screenMaximizedModal:not([hidden])) .quick-control-bar,
+body:has(#screenMaximizedModal[style*="display: flex"]) .quick-control-bar {
+  display: none !important;
+}
+
+/* NEURAL & TELEMETRY MODAL */
 .telemetry-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
