@@ -64,6 +64,8 @@ class ConversationManager:
 		self.desktop_context = get_desktop_context()
 		self.events = events or EventHub()
 		self.settings = settings or Settings()
+		if self.speaker is not None:
+			self.speaker.muted = not bool(self.settings.get("pc_speaker_enabled", False))
 		self.history = history or HistoryStore()
 		self.state_callback = state_callback or (lambda state: None)
 		self.running = True
@@ -191,7 +193,10 @@ class ConversationManager:
 		self._last_submitted_cmd = lower_text
 		self._last_submitted_time = now
 		self._current_source = source
-		if source in ("remote", "remote_voice", "web", "text"):
+		# Remote/phone sources mute the PC mic+speaker via set_remote_active;
+		# local UI sources ("web", "text", "desktop") must still be queued.
+		if source in ("remote", "remote_voice", "phone",
+		               "iphone", "safari", "web", "text"):
 			self.set_remote_active(True)
 		self._inbox.put(("text", cleaned, source))
 
@@ -217,10 +222,12 @@ class ConversationManager:
 				self._arm_listening()
 
 	def set_remote_active(self, active: bool = True) -> None:
-		"""Signal that an iPhone or remote companion is active; mutes PC mic."""
+		"""Signal that an iPhone or remote companion is active; mutes PC mic and speaker."""
 		self._remote_active = active
 		if active:
 			self._last_remote_time = perf_counter()
+			if self.speaker is not None:
+				self.speaker.muted = True
 			if self.listener is not None and self._listening:
 				self._pause.set()
 				self._listening = False
@@ -228,7 +235,11 @@ class ConversationManager:
 
 	def _is_remote_turn(self) -> bool:
 		"""Determine if the current turn originates from iPhone/remote to keep PC hardware speakers completely silent."""
-		if getattr(self, "_current_source", "") in ("remote", "remote_voice", "web", "text"):
+		# If PC hardware speakers are disabled in settings (default False), keep PC 100% silent and respond on phone only
+		if not bool(self.settings.get("pc_speaker_enabled", False)):
+			return True
+		src = getattr(self, "_current_source", "")
+		if src in ("remote", "remote_voice", "phone", "iphone", "safari", "web", "text"):
 			return True
 		if getattr(self, "_remote_active", False) and (perf_counter() - getattr(self, "_last_remote_time", 0.0) < 3600):
 			return True
@@ -262,12 +273,13 @@ class ConversationManager:
 		self.events.emit({"type": "state", "state": state})
 		if state == "idle" and getattr(self, "auto_listen", False):
 			try:
-				from core.proactive import check_proactive_suggestion
-				sugg = check_proactive_suggestion()
-				if sugg:
-					self._emit_speech(True)
-					self.speaker.speak(sugg, wait=True)
-					self._emit_speech(False)
+				if not self._is_remote_turn() and not getattr(self.speaker, "muted", False):
+					from core.proactive import check_proactive_suggestion
+					sugg = check_proactive_suggestion()
+					if sugg:
+						self._emit_speech(True)
+						self.speaker.speak(sugg, wait=True)
+						self._emit_speech(False)
 			except Exception as e:
 				pass
 
@@ -315,21 +327,26 @@ class ConversationManager:
 				item = self._inbox.get()
 				if item is None:
 					break
-				kind = item[0]
-				if kind == "text":
-					src = item[2] if len(item) > 2 else "text"
-					self._handle_text(item[1], source=src)
-				elif kind == "result":
-					self._handle_result(item[1])
-				elif kind == "no_speech":
-					# Stay listening; just re-arm (no error spam to the UI).
-					self._arm_listening()
-				elif kind == "listen_error":
-					print(f"[VOICE INPUT] {item[1]}")
-					if "PortAudio" in str(item[1]) or "Hardware" in str(item[1]):
-						self._emit_notice("Microphone unavailable — check input device.")
-					self.set_state("listening")
-					self._arm_listening()
+				try:
+					kind = item[0]
+					if kind == "text":
+						src = item[2] if len(item) > 2 else "text"
+						self._handle_text(item[1], source=src)
+					elif kind == "result":
+						self._handle_result(item[1])
+					elif kind == "no_speech":
+						# Stay listening; just re-arm (no error spam to the UI).
+						self._arm_listening()
+					elif kind == "listen_error":
+						print(f"[VOICE INPUT] {item[1]}")
+						if "PortAudio" in str(item[1]) or "Hardware" in str(item[1]):
+							self._emit_notice("Microphone unavailable — check input device.")
+						self.set_state("listening")
+						self._arm_listening()
+				except Exception as loop_turn_err:
+					print(f"[TURN LOOP ERROR] {loop_turn_err}")
+					self.set_state("idle")
+					self._pause.clear()
 
 		finally:
 			# Only drop to idle when the microphone is not being re-armed;
@@ -353,8 +370,8 @@ class ConversationManager:
 			print(f"Turn error: {exc}")
 			self._emit_notice("Something went wrong. Please try again.")
 		finally:
+			self._pause.clear()
 			if self.auto_listen and self.listener is not None:
-				self._pause.clear()
 				self._arm_listening()
 
 	def _handle_result(self, result: TranscriptResult) -> None:
@@ -967,15 +984,10 @@ class ConversationManager:
 
 		patterns = (
 			"find and summarize", "search and summarize",
-			"research", "look up and", "look up ", "compare",
-			"analyze", "analyse", "summarize this", "summarise this",
-			"what are the important parts", "find information about",
-			"search the web", "search online", "look through my files",
-			"find the file and", "calculate", "work out",
-			"solve this using", "what is ", "what's ", "who is ",
-			"who was ", "when did ", "where is ", "why is ",
-			"how does ", "how do ", "how can ", "current ",
-			"latest ", "population of ",
+			"research ", "look up and", "look up on the web",
+			"search the web", "search online",
+			"deep research", "web research",
+			"google search", "browse the web for",
 		)
 		return any(pattern in lower for pattern in patterns)
 
@@ -1575,6 +1587,12 @@ class ConversationManager:
 			"notepad": "notepad",
 			"calc": "calculator",
 			"calculator": "calculator",
+			"camera": "camera",
+			"windows camera": "camera",
+			"webcam": "camera",
+			"browser": "browser",
+			"edge": "edge",
+			"microsoft edge": "edge",
 			"cmd": "cmd",
 			"terminal": "terminal",
 		}
@@ -1589,6 +1607,7 @@ class ConversationManager:
 				return launch(direct_target)
 			except Exception as launch_err:
 				print(f"[LAUNCH] Direct launch attempt for '{direct_target}': {launch_err}")
+				return f"I tried to launch {direct_target}, but encountered: {launch_err}"
 
 		open_trigger = any(lower_clean.startswith(prefix) for prefix in ("open ", "launch ", "start ", "switch to ", "bring up ")) or (
 			"open " in lower_clean and any(kw in lower_clean for kw in ("on my pc", "on pc", "browser", "ide", "app", "window"))
@@ -1597,6 +1616,16 @@ class ConversationManager:
 			target = re.sub(r"^(?:please\s+|can\s+you\s+|i\s+asked\s+you\s+to\s+|jarvis\s+)?(?:open\s+up|open|launch|start|switch\s+to|bring\s+up)\s+", "", lower_clean).strip()
 			target = re.sub(r"\s+on\s+(?:my\s+)?pc$", "", target).strip()
 			target = re.sub(r"\s+in\s+(?:the\s+)?browser$", "", target).strip()
+
+			# Direct camera targeting
+			if target in ("camera", "windows camera", "webcam", "my camera"):
+				from tools.computer import launch
+				return launch("camera")
+
+			# Direct browser targeting
+			if target in ("browser", "web browser", "internet"):
+				from tools.computer import launch
+				return launch("browser")
 
 			# If user asked to open/start music or YouTube music, trigger autonomous music playback
 			if target in ("music", "youtube music", "yt music", "song", "a song", "songs") or target.startswith(("music ", "song ", "youtube music ")):
@@ -1630,12 +1659,13 @@ class ConversationManager:
 					self._emit_message("assistant", file_res["display"])
 					return file_res["spoken"]
 
-			# Check installed applications (Antigravity IDE, Chrome, Notepad, Calculator, VS Code, Spotify, etc.)
+			# Check installed applications (Antigravity IDE, Chrome, Notepad, Calculator, VS Code, Spotify, Camera, etc.)
 			from tools.computer import launch
 			try:
 				return launch(target)
 			except Exception as launch_err:
 				print(f"[LAUNCH] Direct launch attempt for '{target}': {launch_err}")
+				return f"I attempted to launch {target}, but encountered: {launch_err}"
 
 		# 7. Music and Video Autoplay on PC
 		if any(k in lower_clean for k in ("play music", "play lo-fi", "play lofi", "play song", "play a song", "open music", "open youtube music", "open yt music", "start music")) or (lower_clean.startswith("play ") and ("youtube" in lower_clean or "song" in lower_clean or "music" in lower_clean or len(lower_clean.split()) > 1)):
