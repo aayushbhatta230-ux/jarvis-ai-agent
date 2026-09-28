@@ -78,7 +78,12 @@ def describe_purpose(ext: str, content: str, name: str = "") -> str:
 			if len(comment_lines) >= 2:
 				break
 		if comment_lines:
-			return _tidy(" ".join(comment_lines))
+			joined = comment_lines[0]
+			for nxt in comment_lines[1:]:
+				if not joined.rstrip().endswith((".", "!", "?", ":", ";")):
+					joined = joined.rstrip() + "."
+				joined = joined + " " + nxt.lstrip()
+			return _tidy(joined)
 
 	# 2. Markup titles
 	if ext in (".html", ".htm", ".xml"):

@@ -41,6 +41,134 @@ CODE_EXTENSIONS = {
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# ---------------------------------------------------------------------- #
+# Binary file kind labels ("what is it related to" for non-text files)
+# ---------------------------------------------------------------------- #
+INSTALLER_EXTS = {".exe", ".msi"}
+ARCHIVE_EXTS = {".zip", ".rar", ".7z", ".tar", ".gz"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".svg"}
+VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm"}
+AUDIO_EXTS = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
+DOC_EXTS = {".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls"}
+INSTALLER_NAME_HINTS = (
+    ("claude", "Claude desktop app"), ("chatgpt", "ChatGPT"), ("antigravity", "Antigravity"),
+    ("vscode", "Visual Studio Code"), ("chrome", "Google Chrome"), ("firefox", "Firefox"),
+    ("notion", "Notion"), ("discord", "Discord"), ("spotify", "Spotify"),
+    ("obs", "OBS Studio"), ("vlc", "VLC"), ("zoom", "Zoom"), ("teams", "Microsoft Teams"),
+    ("node", "Node.js"), ("python", "Python"), ("git", "Git"),
+    ("cursor", "Cursor editor"), ("windsurf", "Windsurf"), ("postman", "Postman"),
+    ("docker", "Docker Desktop"), ("virtualbox", "VirtualBox"), ("vmware", "VMware"),
+)
+
+
+def _clean_app_name(stem: str) -> str:
+    """Turn 'Claude Setup' / 'Antigravity-x64' into 'Claude' / 'Antigravity'."""
+    name = re.sub(r"[-_. ]?(setup|installer|install|x64|x86|win64|win32|amd64|v?\d[\d.]*)", "", stem, flags=re.I)
+    return name.strip(" -_.") or stem.rsplit(" ", 1)[0].strip() or stem
+
+
+def _summarise_archive(path: Path) -> str:
+    """Peek inside a zip archive (central directory only — fast, stdlib)."""
+    try:
+        import zipfile
+        with zipfile.ZipFile(str(path)) as zf:
+            names = [n for n in zf.namelist() if not n.endswith("/")]
+        if not names:
+            return "It's an empty archive."
+        if len(names) == 1:
+            return f"It contains a single item: {names[0].split('/')[-1]}."
+        tops = sorted({n.split("/")[0] for n in names})
+        if len(tops) <= 3:
+            return f"It contains {len(names)} files, mainly {', '.join(tops[:3])}."
+        return f"It contains {len(names)} files across {len(tops)} folders."
+    except Exception:
+        return "It's an archive — I couldn't peek inside it."
+
+
+def _summarise_image(path: Path) -> str:
+    """Report image dimensions (lazy load — fast)."""
+    try:
+        from PIL import Image
+        with Image.open(str(path)) as img:
+            w, h = img.size
+        megapixels = (w * h) / 1_000_000
+        return f"It's an image, {w} by {h} pixels (about {megapixels:.1f} megapixels)."
+    except Exception:
+        return "It's an image file."
+
+
+def _summarise_media(path: Path, kind: str) -> str:
+    """Describe audio/video downloads (metadata-free — fast)."""
+    return f"It's a {kind} file." if kind else "It's a media file."
+
+
+def describe_file_relation(target: str | Path) -> dict[str, Any]:
+    """Answer 'what is this file related to?' in one fast, natural sentence.
+
+    Works for code, text, archives, images, media, installers and documents
+    without an LLM round trip. Returns ``{"kind", "relation", "readable"}``.
+    """
+    path = Path(str(target)).expanduser()
+    name = path.name
+    stem = path.stem
+    ext = path.suffix.lower()
+    lowered = name.lower()
+
+    # 1. Readable text/code files — content-aware via purpose inference.
+    if ext in CODE_EXTENSIONS or ext in (".log", ".ini", ".cfg", ".toml", ".env"):
+        try:
+            raw = path.read_bytes()
+            if b"\x00" not in raw[:2048]:
+                text = raw[:65536].decode("utf-8", errors="replace")
+                from tools.file_analysis import describe_purpose
+                purpose = describe_purpose(ext, text, name)
+                return {
+                    "kind": "text",
+                    "relation": f"It's related to {purpose[0].lower() + purpose[1:] if purpose else 'its contents'}.",
+                    "readable": True,
+                }
+        except Exception:
+            pass
+        lang = CODE_EXTENSIONS.get(ext, "text file")
+        return {"kind": "text", "relation": f"It's a {lang} source file.", "readable": True}
+
+    # 2. Installers — match well-known apps, else clean the name.
+    if ext in INSTALLER_EXTS:
+        for hint, app in INSTALLER_NAME_HINTS:
+            if hint in lowered:
+                return {"kind": "installer", "relation": f"It's related to {app} — it looks like the installer for it.", "readable": False}
+        return {"kind": "installer", "relation": f"It's an installer for {_clean_app_name(stem)}.", "readable": False}
+
+    # 3. Archives — peek inside (zip central directory).
+    if ext in ARCHIVE_EXTS:
+        if ext == ".zip":
+            return {"kind": "archive", "relation": _summarise_archive(path), "readable": False}
+        return {"kind": "archive", "relation": "It's a compressed archive.", "readable": False}
+
+    # 4. Images — dimensions.
+    if ext in IMAGE_EXTS:
+        return {"kind": "image", "relation": _summarise_image(path), "readable": False}
+
+    # 5. Media — kind by extension.
+    if ext in VIDEO_EXTS:
+        label = {"mp4": "video", "mkv": "video", "avi": "video", "mov": "video clip", "webm": "web video"}.get(ext.lstrip("."), "video")
+        return {"kind": "video", "relation": _summarise_media(path, label), "readable": False}
+    if ext in AUDIO_EXTS:
+        return {"kind": "audio", "relation": "It's an audio file.", "readable": False}
+
+    # 6. Documents — kind by type.
+    if ext == ".pdf":
+        return {"kind": "document", "relation": "It's a PDF document.", "readable": False}
+    if ext in (".docx", ".doc"):
+        return {"kind": "document", "relation": "It's a Word document.", "readable": False}
+    if ext in (".pptx", ".ppt"):
+        return {"kind": "document", "relation": "It's a presentation file.", "readable": False}
+    if ext in (".xlsx", ".xls"):
+        return {"kind": "document", "relation": "It's a spreadsheet.", "readable": False}
+
+    return {"kind": "file", "relation": f"It's a {ext.lstrip('.').upper() or 'miscellaneous'} file.", "readable": False}
+
+
 EXCLUDE_DIRS = {
     ".git",
     "node_modules",
@@ -196,6 +324,20 @@ def inspect_and_read_file(target: str, max_chars: int = 12000) -> dict[str, Any]
         # Extract brief description / summary
         summary = _extract_file_summary(file_path.name, ext, lines, content)
 
+        # Natural-language sentence about what the file is about (spoken reply).
+        try:
+            from tools.file_analysis import describe_purpose
+            file_purpose = describe_purpose(ext, content, file_path.name)
+        except Exception:
+            file_purpose = summary
+        if file_purpose and not file_purpose.endswith("."):
+            file_purpose = file_purpose + "."
+        low_purpose = (file_purpose or "").lower()
+        if low_purpose.startswith("it ") or low_purpose.startswith("this "):
+            purpose_sentence = "It's related to " + low_purpose.split(None, 1)[1].rstrip(".") + "."
+        else:
+            purpose_sentence = file_purpose or summary
+
         # Prepare code preview for chat display
         preview_text = content
         if len(preview_text) > max_chars:
@@ -209,7 +351,9 @@ def inspect_and_read_file(target: str, max_chars: int = 12000) -> dict[str, Any]
             f"```"
         )
 
-        spoken_response = f"Here is {file_path.name}, sir. {summary}"
+        spoken_response = "Here's {name}, sir. {purpose}".format(
+            name=file_path.name, purpose=purpose_sentence
+        )
 
         # Park the file as the active working context so follow-up questions
         # ("what is it about?", "suggest changes") are grounded in real content.
@@ -482,16 +626,30 @@ def get_recent_downloads(limit: int = 5) -> dict[str, Any]:
     m_size = _fmt_size(most_recent[1].st_size)
     m_date = _fmt_date(most_recent[1].st_mtime)
 
-    spoken_parts = [f"Your most recent downloaded file is {m_name} ({m_size}), downloaded {m_date}."]
+    spoken_parts = ["Your most recent downloaded file is {m} ({s}), downloaded {d}.".format(
+        m=m_name, s=m_size, d=m_date
+    )]
+    try:
+        recent_relation = describe_file_relation(most_recent[0]).get("relation", "")
+    except Exception:
+        recent_relation = ""
+    if recent_relation:
+        spoken_parts.append(recent_relation)
     if len(top_files) > 1:
         other_names = [f[0].name for f in top_files[1:3]]
-        spoken_parts.append(f"You also recently downloaded {', and '.join(other_names)}.")
+        extra = ", and ".join(other_names)
+        spoken_parts.append("Just before that, you grabbed {}.".format(extra))
 
     spoken = " ".join(spoken_parts)
 
     display_lines = ["📁 **Recent Downloads:**\n"]
     for i, (path, st) in enumerate(top_files, 1):
-        display_lines.append(f"{i}. **{path.name}** ({_fmt_size(st.st_size)}) &mdash; *{_fmt_date(st.st_mtime)}*")
+        line = "{n}. **{p}** ({s}) — *{d}*".format(
+            n=i, p=path.name, s=_fmt_size(st.st_size), d=_fmt_date(st.st_mtime)
+        )
+        if i == 1 and recent_relation:
+            line += "\n   ↳ {}".format(recent_relation)
+        display_lines.append(line)
 
     display = "\n".join(display_lines)
 

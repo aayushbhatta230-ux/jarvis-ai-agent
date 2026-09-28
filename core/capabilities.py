@@ -148,13 +148,12 @@ def _sc_hotkey(keys: list[str]) -> ActionResult:
 def _system_diagnostics() -> str:
     """Honest report of dependency availability (never claims what is missing)."""
     from core.screencontrol import HAS_PYAUTOGUI, HAS_MSS, HAS_PIL
-    from vision.analyze import HAS_TESSERACT, tesseract_available
+    from vision.analyze import tesseract_available
     lines = [
         f"Screen capture (mss): {'available' if HAS_MSS else 'missing'}",
         f"Screen capture (Pillow): {'available' if HAS_PIL else 'missing'}",
         f"Keyboard/mouse (pyautogui): {'available' if HAS_PYAUTOGUI else 'missing'}",
-        f"OCR package (pytesseract): {'installed' if HAS_TESSERACT else 'missing'}; "
-        f"Tesseract engine: {'found' if tesseract_available() else 'NOT FOUND on disk'}",
+        f"OCR engine: {'found' if tesseract_available() else 'NOT FOUND on disk'} (direct-subprocess mode, no pytesseract needed)",
     ]
     return "\n".join(lines)
 

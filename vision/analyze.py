@@ -1,29 +1,43 @@
 '''Vision analysis module for JARVIS.
 
-Provides OCR on the current screen using pytesseract and returns structured
-information including text strings and bounding boxes.
+Provides OCR on the current screen and returns structured information
+including text strings and bounding boxes.
+
+Two engines are supported, in order of preference:
+
+1. **Tesseract** - invoked as a *direct subprocess* (``tesseract.exe`` with
+   TSV output). This deliberately avoids importing ``pytesseract``, which
+   pulls in ``pandas``/``pyarrow`` at import time; on machines protected by
+   an Application Control policy those native DLLs are blocked, which used
+   to make OCR report itself as "unreachable" even though the engine was
+   installed. Shelling out is also faster: no pandas/pyarrow import cost.
+2. **Windows built-in OCR** (``winsdk``) - best-effort fallback.
 '''
 
 from __future__ import annotations
 
+import csv
+import io
 import os
+import subprocess
+import sys
 from dataclasses import dataclass
 from shutil import which
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 from tools.screen import _grab_image  # internal helper to capture Pillow Image
 
-try:
-    import pytesseract  # noqa: F401
-    HAS_TESSERACT = True
-except ImportError:  # pragma: no cover
-    HAS_TESSERACT = False
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from PIL import Image
 
 # Common install locations for the Tesseract engine binary on Windows.
 _TESSERACT_BIN_CANDIDATES = (
     "C:/Program Files/Tesseract-OCR/tesseract.exe",
     "C:/Program Files (x86)/Tesseract-OCR/tesseract.exe",
     os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+    "/usr/bin/tesseract",
+    "/usr/local/bin/tesseract",
+    "/opt/homebrew/bin/tesseract",
 )
 
 # Whether the Windows built-in OCR engine is reachable (best-effort fallback).
@@ -33,6 +47,10 @@ try:
     HAS_WINDOWS_OCR = True
 except Exception:  # pragma: no cover - optional fallback only  # noqa: BLE001
     HAS_WINDOWS_OCR = False
+
+# Cached engine path so we do not re-scan the filesystem on every capture.
+_TESSERACT_CMD: str | None = None
+_TESSERACT_PROBED = False
 
 
 @dataclass(frozen=True)
@@ -59,78 +77,156 @@ class VisionResult:
     boxes: List[VisionBox]
 
 
+def _find_tesseract() -> str | None:
+    """Locate the Tesseract binary once and cache the result."""
+    global _TESSERACT_CMD, _TESSERACT_PROBED
+    if _TESSERACT_PROBED:
+        return _TESSERACT_CMD
+
+    _TESSERACT_PROBED = True
+    found = which("tesseract")
+    if found:
+        _TESSERACT_CMD = found
+        return _TESSERACT_CMD
+    for candidate in _TESSERACT_BIN_CANDIDATES:
+        if candidate and os.path.exists(candidate):
+            _TESSERACT_CMD = candidate
+            return _TESSERACT_CMD
+    _TESSERACT_CMD = None
+    return None
+
+
 def tesseract_available() -> bool:
-    """True when the Tesseract *engine* can actually be invoked (not just pkg)."""
-    if not HAS_TESSERACT:
-        return False
-    if which("tesseract"):
-        return True
-    return any(os.path.exists(c) for c in _TESSERACT_BIN_CANDIDATES)
+    """True when the Tesseract *engine* can actually be invoked."""
+    return _find_tesseract() is not None
 
 
 def _configure_tesseract() -> bool:
-    """Point pytesseract at a discovered engine; return True if it is usable."""
-    if not HAS_TESSERACT:
-        return False
-    for candidate in _TESSERACT_BIN_CANDIDATES:
-        if os.path.exists(candidate):
-            try:
-                import pytesseract as _pt
-                _pt.pytesseract.tesseract_cmd = candidate
-                _pt.get_tesseract_version()  # raises if the engine is unusable
-                return True
-            except Exception:  # noqa: BLE001
-                continue
-    return False
+    """Kept for backwards compatibility with older callers.
+
+    The subprocess engine needs no configuration; this simply reports
+    whether the binary was found.
+    """
+    return _find_tesseract() is not None
+
+
+def _run_tesseract(img) -> str:
+    """Run the Tesseract binary on a Pillow image and return raw TSV text."""
+    cmd = _find_tesseract()
+    if not cmd:
+        raise RuntimeError("Tesseract binary not found")
+
+    buf = io.BytesIO()
+    # PNG keeps text crisp; PSM 6 treats the capture as a uniform text block,
+    # which is the right model for a full desktop screenshot.
+    img.save(buf, format="PNG")
+
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    proc = subprocess.run(
+        [cmd, "stdin", "stdout", "-l", "eng", "--psm", "6", "tsv"],
+        input=buf.getvalue(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=90,
+        creationflags=creationflags,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise RuntimeError(detail or f"tesseract exited with {proc.returncode}")
+    return (proc.stdout or b"").decode("utf-8", errors="replace")
+
+
+def _parse_tsv(tsv_text: str) -> VisionResult:
+    """Turn Tesseract TSV output into grouped lines plus per-word boxes."""
+    boxes: List[VisionBox] = []
+    lines: List[str] = []
+    current_key = None
+    current_words: List[str] = []
+
+    reader = csv.DictReader(io.StringIO(tsv_text), delimiter="\t", quoting=csv.QUOTE_NONE)
+    for row in reader:
+        if (row.get("level") or "").strip() != "5":
+            continue  # 5 == word level
+        word = (row.get("text") or "").strip()
+        if not word:
+            continue
+        try:
+            left = int(float(row.get("left") or 0))
+            top = int(float(row.get("top") or 0))
+            width = int(float(row.get("width") or 0))
+            height = int(float(row.get("height") or 0))
+            conf = float(row.get("conf") or -1)
+        except (TypeError, ValueError):
+            continue
+        if conf < 25:  # discard low-confidence noise
+            continue
+
+        key = (
+            (row.get("block_num") or "").strip(),
+            (row.get("par_num") or "").strip(),
+            (row.get("line_num") or "").strip(),
+        )
+        if current_key is not None and key != current_key:
+            joined = " ".join(current_words).strip()
+            if joined:
+                lines.append(joined)
+            current_words = []
+        current_key = key
+
+        current_words.append(word)
+        boxes.append(VisionBox(text=word, bbox=(left, top, width, height)))
+
+    joined = " ".join(current_words).strip()
+    if joined:
+        lines.append(joined)
+
+    return VisionResult(full_text="\n".join(lines), boxes=boxes)
 
 
 def analyze_screen(img: Image.Image | None = None) -> VisionResult:
     """Capture the screen and run OCR, returning text and per-word boxes.
 
-    Prefers Tesseract. If its engine binary is missing it falls back to the
-    Windows built-in OCR engine. If neither is usable it raises a clear
-    ``RuntimeError`` so callers never see fabricated text.
+    Prefers Tesseract (run as a subprocess). If the engine binary is missing it
+    falls back to the Windows built-in OCR engine. If neither is usable it
+    raises a clear ``RuntimeError`` so callers never see fabricated text.
     """
+    if img is None:
+        img = _grab_image()
+
     if tesseract_available():
-        _configure_tesseract()
         try:
-            return _analyze_tesseract(img)
+            return _parse_tsv(_run_tesseract(img))
         except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"OCR (Tesseract) failed: {exc}") from exc
-    if _configure_tesseract():
-        try:
-            return _analyze_tesseract(img)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"OCR (Tesseract) failed: {exc}") from exc
+            if not HAS_WINDOWS_OCR:
+                raise RuntimeError(f"OCR (Tesseract) failed: {exc}") from exc
+            tesseract_error: Exception | None = exc
+    else:
+        tesseract_error = None
+
     if HAS_WINDOWS_OCR:
         try:
             return _analyze_windows_ocr(img)
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"OCR (Windows) failed: {exc}") from exc
+
+    if tesseract_error is not None:
+        raise RuntimeError(f"OCR (Tesseract) failed: {tesseract_error}") from tesseract_error
+
     raise RuntimeError(
-        "OCR is not available. Tesseract is not installed and the Windows OCR "
-        "engine is unreachable. Install Tesseract "
-        "(https://github.com/UB-Mannheim/tesseract/wiki) and restart JARVIS."
+        "OCR engine not found. Install Tesseract "
+        "(https://github.com/UB-Mannheim/tesseract/wiki) and restart JARVIS, "
+        "or run 'pip install winsdk' for the Windows OCR fallback."
     )
 
 
 def _analyze_tesseract(img: Image.Image | None = None) -> VisionResult:
+    """Backwards-compatible wrapper around the subprocess Tesseract engine."""
     if img is None:
         img = _grab_image()
-    data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-    words = data["text"]
-    left = data["left"]
-    top = data["top"]
-    width = data["width"]
-    height = data["height"]
-    boxes: List[VisionBox] = []
-    parts: List[str] = []
-    for txt, l, t, w, h in zip(words, left, top, width, height):
-        piece = str(txt).strip()
-        if piece:
-            parts.append(piece)
-            boxes.append(VisionBox(text=piece, bbox=(int(l), int(t), int(w), int(h))))
-    return VisionResult(full_text=" ".join(parts), boxes=boxes)
+    return _parse_tsv(_run_tesseract(img))
 
 
 def _analyze_windows_ocr(img: Image.Image | None = None) -> VisionResult:

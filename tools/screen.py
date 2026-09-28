@@ -178,14 +178,14 @@ def get_screen_base64(width: int = 1920, height: int = 1080) -> str:
 def extract_text_from_screen() -> str:
     """Capture the screen and extract text using OCR.
 
-    Returns the extracted text. Useful for reading what's on screen.
+    Uses the subprocess Tesseract engine (never the pytesseract package,
+    whose pandas/pyarrow dependency chain can be blocked by Application
+    Control policies). Returns the extracted text.
     """
-    if not HAS_TESSERACT:
-        raise RuntimeError("OCR requires 'pytesseract'. Install with: pip install pytesseract")
-    _ensure_tesseract_configured()
-    img = _grab_image()
-    text = pytesseract.image_to_string(img)
-    return text.strip() if text.strip() else "(No text detected on screen)"
+    from vision.analyze import analyze_screen
+    result = analyze_screen()
+    text = (result.full_text or "").strip()
+    return text if text else "(No text detected on screen)"
 
 def describe_screen() -> str:
     """Capture and describe what's on the screen.
