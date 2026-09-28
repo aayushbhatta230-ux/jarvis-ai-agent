@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+
+from tools.win_exec import run_no_window
 import os
 from pathlib import Path
 
@@ -53,7 +55,7 @@ def execute(command: str, timeout: int = 30, working_dir: str | None = None) -> 
         cwd = str(Path(working_dir).expanduser().resolve())
 
     try:
-        result = subprocess.run(
+        result = run_no_window(
             command,
             shell=True,
             capture_output=True,
@@ -93,7 +95,7 @@ def run_python(code: str, timeout: int = 15) -> str:
             return f"I can't run code containing '{pattern}' for safety."
 
     try:
-        result = subprocess.run(
+        result = run_no_window(
             ["python", "-c", code],
             capture_output=True,
             text=True,

@@ -6,6 +6,11 @@ import subprocess
 import os
 from typing import Any
 
+# Windows: prevents a console window from flashing open for every helper
+# process we spawn. Without this, each command visibly flickers a black
+# terminal window, which reads as "lagging" to the user.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
 try:
     import psutil
     HAS_PSUTIL = True
@@ -213,21 +218,21 @@ def launch(application: str) -> str:
         "camera": {
             "keywords": ["camera", "windows camera"],
             "launch": lambda: os.startfile("microsoft.windows.camera:"),
-            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "microsoft.windows.camera:"], shell=False),
+            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "microsoft.windows.camera:"], shell=False, creationflags=_NO_WINDOW),
         },
         "chrome": {
             "keywords": ["chrome", "google chrome"],
             "launch": lambda: os.startfile(chrome_lnk) if os.path.exists(chrome_lnk) else os.startfile("chrome"),
-            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", r"C:\Program Files\Google\Chrome\Application\chrome.exe"], shell=False),
+            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", r"C:\Program Files\Google\Chrome\Application\chrome.exe"], shell=False, creationflags=_NO_WINDOW),
         },
         "browser": {
             "keywords": ["chrome", "google chrome", "edge", "microsoft edge", "browser", "firefox", "brave"],
             "launch": lambda: os.startfile("https://www.google.com"),
-            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "https://www.google.com"], shell=False),
+            "fallback": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "https://www.google.com"], shell=False, creationflags=_NO_WINDOW),
         },
         "edge": {
             "keywords": ["edge", "microsoft edge"],
-            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "msedge"], shell=False),
+            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "msedge"], shell=False, creationflags=_NO_WINDOW),
             "fallback": lambda: os.startfile("microsoft-edge:"),
         },
         "notepad": {
@@ -235,14 +240,14 @@ def launch(application: str) -> str:
             "launch": lambda: subprocess.Popen([
                 "explorer.exe",
                 r"shell:AppsFolder\Microsoft.WindowsNotepad_8wekyb3d8bbwe!App"
-            ]),
+            ], creationflags=_NO_WINDOW),
         },
         "calculator": {
             "keywords": ["calculator"],
             "launch": lambda: subprocess.Popen([
                 "explorer.exe",
                 r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"
-            ]),
+            ], creationflags=_NO_WINDOW),
         },
         "spotify": {
             "keywords": ["spotify"],
@@ -250,7 +255,7 @@ def launch(application: str) -> str:
         },
         "vscode": {
             "keywords": ["visual studio code", "code"],
-            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "code"], shell=False),
+            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "code"], shell=False, creationflags=_NO_WINDOW),
         },
         "settings": {
             "keywords": ["settings"],
@@ -258,25 +263,25 @@ def launch(application: str) -> str:
         },
         "task manager": {
             "keywords": ["task manager"],
-            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "taskmgr"], shell=False),
+            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "taskmgr"], shell=False, creationflags=_NO_WINDOW),
         },
         "explorer": {
             "keywords": ["file explorer", "explorer"],
-            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "explorer"], shell=False),
+            "launch": lambda: subprocess.Popen(["cmd.exe", "/c", "start", "", "explorer"], shell=False, creationflags=_NO_WINDOW),
         },
         "antigravity": {
             "keywords": ["antigravity", "antigravity ide"],
-            "launch": lambda: subprocess.Popen([os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")]),
+            "launch": lambda: subprocess.Popen([os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")], creationflags=_NO_WINDOW),
             "fallback": lambda: os.startfile(os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")),
         },
         "antigravity ide": {
             "keywords": ["antigravity", "antigravity ide"],
-            "launch": lambda: subprocess.Popen([os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")]),
+            "launch": lambda: subprocess.Popen([os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")], creationflags=_NO_WINDOW),
             "fallback": lambda: os.startfile(os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")),
         },
         "antigravity id": {
             "keywords": ["antigravity", "antigravity ide"],
-            "launch": lambda: subprocess.Popen([os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")]),
+            "launch": lambda: subprocess.Popen([os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")], creationflags=_NO_WINDOW),
             "fallback": lambda: os.startfile(os.path.expandvars(r"%LOCALAPPDATA%\Programs\Antigravity IDE\Antigravity IDE.exe")),
         },
         "chatgpt": {
@@ -325,7 +330,7 @@ def launch(application: str) -> str:
                 for p in paths:
                     if os.path.exists(p):
                         try:
-                            subprocess.Popen([p])
+                            subprocess.Popen([p], creationflags=_NO_WINDOW)
                             launched = True
                             break
                         except Exception:
@@ -344,7 +349,7 @@ def launch(application: str) -> str:
 
     if not launched:
         try:
-            subprocess.Popen(["cmd.exe", "/c", "start", name], shell=False)
+            subprocess.Popen(["cmd.exe", "/c", "start", name], shell=False, creationflags=_NO_WINDOW)
             launched = True
         except Exception:
             pass

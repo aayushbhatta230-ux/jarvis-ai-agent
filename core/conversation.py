@@ -1176,6 +1176,154 @@ class ConversationManager:
 
 
 
+	def _try_agentic(self, transcript: str, lower_clean: str) -> str | None:
+		"""Interpret the request with the LLM planner and execute any real actions.
+
+		Returns the spoken reply when the planner produced something actionable,
+		or ``None`` to let the existing keyword/LLM pipeline handle the request.
+		"""
+		# Conversational chit-chat and greetings are handled far faster elsewhere.
+		if re.match(
+			r"^(?:hi|hey|hello|thanks|thank you|ok|okay|cool|nice|good (?:morning|"
+			r"evening|night)|bye|goodbye|how are you|who are you|what can you do)\b",
+			lower_clean,
+		):
+			return None
+
+		# The planner adds an LLM round-trip; don't pay it for commands the
+		# deterministic layer already handles in microseconds.
+		if re.match(
+			r"^(?:volume|mute|unmute|play|pause|next|previous|lock|sleep|screenshot|"
+			r"lock pc|show desktop|clean cache|system diagnostics|stop speaking)\b",
+			lower_clean,
+		):
+			return None
+
+		try:
+			from core.agentic import plan_from_text, sanitize_plan
+			from core.agentic_exec import execute_plan
+		except Exception as exc:  # noqa: BLE001 - never break the main path
+			print(f"[AGENTIC] planner unavailable: {exc}")
+			return None
+
+		try:
+			raw_plan = plan_from_text(transcript, getattr(self, "brain", None))
+		except Exception as exc:  # noqa: BLE001
+			print(f"[AGENTIC] planning failed: {exc}")
+			return None
+
+		plan = sanitize_plan(raw_plan)
+		if not plan:
+			return None  # unusable plan -> existing behaviour
+
+		# Literal content the user actually typed must not be re-interpreted by
+		# the model -- it sometimes drops trailing words ("hello from jarvis"
+		# became "hello from"). Prefer a direct parse of the transcript.
+		self._prefer_literal_content(plan, transcript)
+
+		# "answer" means: nothing to execute, let normal conversation handle it.
+		actions = [s["action"] for s in plan["steps"]]
+		if set(actions) == {"answer"}:
+			return None
+
+		# If the model asked to clarify but gave no question, it clearly wasn't
+		# confident. Before giving up, try a direct, honest UI-target click: the
+		# user named something concrete, so we can look for it on screen rather
+		# than interrogating them.
+		if "needs_clarification" in actions:
+			if not (plan.get("question") or "").strip():
+				fallback = self._agentic_click_fallback(lower_clean)
+				if fallback is not None:
+					return fallback
+				return None
+			return None
+
+		# Never let the planner swallow plain factual questions: the knowledge
+		# pipeline below answers those faster and better.
+		if set(actions) <= {"answer", "needs_clarification"} and not plan.get("reply"):
+			return None
+
+		self.set_state("executing")
+		try:
+			result = execute_plan(plan)
+		except Exception as exc:  # noqa: BLE001
+			print(f"[AGENTIC] execution failed: {exc}")
+			return None
+
+		if not result or result.get("delegate_to_llm"):
+			return None
+
+		spoken = (result.get("spoken") or "").strip()
+		display = result.get("display")
+		if spoken:
+			self._emit_message("assistant", spoken)
+		if display:
+			self._emit_message("assistant", display)
+		return spoken or "Done, sir."
+
+	@staticmethod
+	def _prefer_literal_content(plan: dict, transcript: str) -> None:
+		"""Replace planner-supplied file content with the literal spoken text.
+
+		When the user says *"create a file notes.txt with the content buy milk"*,
+		"buy milk" is the payload. Round-tripping it through an LLM risks silent
+		truncation, so we read it straight from the transcript instead.
+		"""
+		for step in plan.get("steps") or []:
+			if step.get("action") not in ("create_file", "append_file"):
+				continue
+			m = re.search(
+				r"(?:with|containing|that\s+says|which\s+says|saying)\s+"
+				r"(?:the\s+)?(?:content|contents|text|words|following)?\s*[:=\-]?\s*"
+				r"(?P<body>.+)$",
+				transcript,
+				flags=re.I | re.S,
+			)
+			if not m:
+				continue
+			body = m.group("body").strip()
+			# Strip one layer of surrounding quotes.
+			if len(body) >= 2 and body[0] in "\"“" and body[-1] in "\"”":
+				body = body[1:-1].strip()
+			# Trailing courtesy words are politeness, not content. NOTE: do NOT strip
+			# "jarvis" here -- in "with the content hello from jarvis" that word is
+			# part of the payload, and removing it truncated the file.
+			body = re.sub(r"[, ]+\b(?:please|thanks|thank you)\b[.?!]?$", "", body, flags=re.I).strip()
+			if body:
+				step["text"] = body
+
+	def _agentic_click_fallback(self, lower_clean: str) -> str | None:
+		"""When the planner won't commit, still try to click a named UI element.
+
+		Only handles explicit "click/tap/press on X" phrasing. Returns ``None``
+		when the request isn't a click or the target can't be located, so the
+		caller can fall through to the normal pipeline.
+		"""
+		m = re.match(
+			r"^(?:please\s+)?(?:jarvis[, ]+)?(?:click|tap|press|hit)\s+"
+			r"(?:on\s+|the\s+)*(.+?)\s*$",
+			lower_clean,
+		)
+		if not m:
+			return None
+		target = m.group(1).strip(" .?!,")
+		if not target or target in ("it", "that", "this", "there", "here"):
+			return None
+		try:
+			from core.agentic_exec import _click_text
+			res = _click_text(target)
+		except Exception as exc:  # noqa: BLE001
+			print(f"[AGENTIC] click fallback failed: {exc}")
+			return None
+		if res.get("ok"):
+			spoken = res.get("spoken") or "Done."
+			self._emit_message("assistant", spoken)
+			return spoken
+		# The element genuinely isn't on screen -- say so rather than clicking blindly.
+		spoken = res.get("error") or f"I couldn't find '{target}' on your screen."
+		self._emit_message("assistant", spoken)
+		return spoken
+
 	def _quick_response(self, transcript: str) -> str | None:
 		"""Answer latency-sensitive social and profile checks without an LLM trip."""
 		from datetime import datetime
@@ -1548,13 +1696,40 @@ class ConversationManager:
 				except Exception as exc:
 					return f"I tried to open {self._last_file_reference}, but encountered: {exc}"
 
+		# 1e-PRE. Write/append/delete intents are routed to the agentic layer
+		# *before* the file-reading block below, because that block treats any
+		# mention of a filename as a request to read it. "create a file notes.txt"
+		# would otherwise be answered with "could not find file".
+		if re.match(
+			r"^(?:please\s+)?(?:create|make|write|generate|build|add|append|"
+			r"save|delete|remove)\b",
+			lower_clean,
+		):
+			early_agentic = self._try_agentic(transcript, lower_clean)
+			if early_agentic is not None:
+				return early_agentic
+
 		# 1e. Intelligent File Reading, Display & Brief Summary
 		file_read_kw = ("read", "open", "show me", "view", "display", "check", "inspect", "tell me what's in", "what is in", "what's inside", "what is inside", "contents of", "summarize", "cat")
 		has_file_ext = any(ext in lower_clean for ext in (".js", ".py", ".html", ".css", ".json", ".txt", ".md", ".ts", ".jsx", ".tsx", ".csv", ".xml", ".yaml", ".yml", ".sql", ".sh", ".bat"))
 		is_file_read_phrase = any(lower_clean.startswith(kw + " ") or f" {kw} " in lower_clean for kw in file_read_kw)
 
+		# A request to *create/write/append/delete* mentions a filename too, but it
+		# must not be treated as a read -- otherwise "create a file notes.txt ..."
+		# is intercepted here, fails to find the (not yet existing) file, and the
+		# agentic layer below never gets a chance to write it.
+		_is_write_intent = bool(re.match(
+			r"^(?:please\s+)?(?:create|make|write|generate|build|new|add|append|"
+			r"save|delete|remove|rename|copy|move)\b",
+			lower_clean,
+		))
+
 		# Check if direct filename was requested (e.g. "test_dom.js", "read test_dom.js", "open test_dom.js")
-		if has_file_ext or (is_file_read_phrase and "file" in lower_clean) or (intent.intent == "file" and intent.sub_intent in ("read", "open")):
+		if not _is_write_intent and (
+			has_file_ext
+			or (is_file_read_phrase and "file" in lower_clean)
+			or (intent.intent == "file" and intent.sub_intent in ("read", "open"))
+		):
 			target = None
 			entities = intent.extracted_entities or {}
 			if entities.get("file_reference"):
@@ -1787,6 +1962,15 @@ class ConversationManager:
 			if c_res.get("display"):
 				self._emit_message("assistant", c_res["display"])
 			return c_res.get("spoken", "Committed and pushed to GitHub, sir.")
+
+		# 4h-AGENTIC. Let the planner interpret the request before any keyword
+		# matching happens. This is what stops JARVIS from guessing (it used to
+		# answer "what is 2 plus 2" by pressing win+down) and lets it compose
+		# multi-step actions like "click search, type cats, press enter".
+		# If the planner is unavailable or unsure we fall through untouched.
+		agentic_reply = self._try_agentic(transcript, lower_clean)
+		if agentic_reply is not None:
+			return agentic_reply
 
 		# 4i0. Contextual file intelligence (analyse / extract / create) —
 		# runs before web research so file questions never hit the network.
@@ -2072,15 +2256,28 @@ class ConversationManager:
 					res = execute_remote_action("new_convo")
 					return res.get("spoken", "Opened a new convo, sir.")
 
+				clicked_ok = False
 				try:
-					from core.screencontrol import get_screen_controller
-					action_res = get_screen_controller().click_ui_element(target_entity)
+					# NOTE: the factory is get_screen_control() -- the previous
+					# name (get_screen_controller) never existed, so this import
+					# always raised ImportError and every targeted click silently
+					# degraded to "click at the current cursor position".
+					from core.screencontrol import get_screen_control
+					action_res = get_screen_control().click_ui_element(target_entity)
 					if action_res and action_res.message:
 						return action_res.message
+					# No message means the click could not be resolved. Report that
+					# honestly instead of clicking a random spot.
+					detail = getattr(action_res, "error", None) or "I couldn't locate it on screen."
+					toast(detail, True)
+					return (
+						f"I couldn't find '{target_entity}' on your screen, sir. "
+						"Let me know what it looks like and I'll try again."
+					)
 				except Exception as click_err:
 					print(f"[CLICK UI] Failed to click '{target_entity}': {click_err}")
 
-			# Default: click at current mouse position
+			# Only reached when no target was named at all (e.g. "click" / "double click").
 			from tools.remote_control import execute_remote_action
 			res = execute_remote_action("click", button=btn, clicks=clicks, x=None, y=None)
 			return res.get("spoken", "Clicked, sir.")

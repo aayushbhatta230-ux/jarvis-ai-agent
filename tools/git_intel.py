@@ -7,6 +7,8 @@ voice-activated commit and push workflows.
 from __future__ import annotations
 
 import subprocess
+
+from tools.win_exec import run_no_window
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 def _run_git(args: list[str]) -> tuple[int, str]:
     try:
-        proc = subprocess.run(
+        proc = run_no_window(
             ["git"] + args,
             cwd=REPO_ROOT,
             capture_output=True,

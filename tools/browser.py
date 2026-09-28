@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from tools.win_exec import popen_no_window
 import time
 import webbrowser
 from urllib.parse import quote_plus
@@ -47,7 +48,7 @@ def open_url(url: str) -> str:
 		for p in (CHROME_PATH, CHROME_X86):
 			if os.path.isfile(p):
 				try:
-					subprocess.Popen(["cmd.exe", "/c", "start", "", p, clean], shell=False)
+					popen_no_window(["cmd.exe", "/c", "start", "", p, clean], shell=False)
 					opened = True
 					break
 				except Exception:
@@ -55,7 +56,7 @@ def open_url(url: str) -> str:
 
 	if not opened:
 		try:
-			subprocess.Popen(["cmd.exe", "/c", "start", "", clean], shell=False)
+			popen_no_window(["cmd.exe", "/c", "start", "", clean], shell=False)
 			opened = True
 		except Exception as exc:
 			raise RuntimeError(f"Could not open browser URL: {exc}")

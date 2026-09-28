@@ -6,14 +6,16 @@ Enables reading, writing, inspecting, and summarizing the system clipboard.
 from __future__ import annotations
 
 import subprocess
+
+from tools.win_exec import run_no_window
 from typing import Any
 
 
 def get_clipboard_text() -> str | None:
     """Read text content from Windows clipboard."""
     try:
-        proc = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+        proc = run_no_window(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -28,8 +30,8 @@ def get_clipboard_text() -> str | None:
 def set_clipboard_text(text: str) -> bool:
     """Write text content to Windows clipboard."""
     try:
-        proc = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", "$input | Set-Clipboard"],
+        proc = run_no_window(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", "$input | Set-Clipboard"],
             input=text,
             capture_output=True,
             text=True,

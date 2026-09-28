@@ -6,6 +6,7 @@ import ctypes
 import os
 import re
 import subprocess
+from tools.win_exec import popen_no_window
 import time
 import urllib.parse
 import urllib.request
@@ -100,7 +101,7 @@ def _ensure_chrome_open(url: str) -> bool:
         chrome_exe = _find_chrome_exe()
         if chrome_exe:
             try:
-                subprocess.Popen([chrome_exe, url])
+                popen_no_window([chrome_exe, url])
                 time.sleep(2.0)
                 focus_window_by_keyword("youtube", "chrome")
                 return True
