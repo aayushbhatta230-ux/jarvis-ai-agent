@@ -201,6 +201,16 @@ def _sync_gateway(tunnel_url: str) -> None:
         if not NOJEKYLL_FILE.exists():
             NOJEKYLL_FILE.write_text("# Disable Jekyll\n", encoding="utf-8")
 
+        # Keep docs/index.html byte-identical to the root gateway so GitHub Pages
+        # (gh-pages branch root) always serves the newest gateway build.
+        try:
+            if ROOT_HTML_FILE.is_file():
+                root_html = ROOT_HTML_FILE.read_text(encoding="utf-8")
+                if not GATEWAY_HTML_FILE.is_file() or GATEWAY_HTML_FILE.read_text(encoding="utf-8") != root_html:
+                    GATEWAY_HTML_FILE.write_text(root_html, encoding="utf-8")
+        except Exception:
+            pass
+
         for html_file in (GATEWAY_HTML_FILE, ROOT_HTML_FILE):
             if html_file.is_file():
                 try:
@@ -226,51 +236,42 @@ def _sync_gateway(tunnel_url: str) -> None:
                     pass
 
         def _git_push():
+            """Publish the synced endpoint to both main and gh-pages.
+
+            Deliberately avoids switching branches (which used to leave the repo in a
+            conflicted, mid-merge state while JARVIS was running). Instead we commit on
+            whatever branch is checked out and push that commit straight to both refs.
+            """
+            def _run(args, timeout=15):
+                return subprocess.run(
+                    ["git", *args],
+                    cwd=str(PROJECT_ROOT),
+                    capture_output=True,
+                    timeout=timeout,
+                )
+
             try:
-                subprocess.run(
-                    ["git", "add", "docs/endpoint.json", "docs/index.html", "endpoint.json", "index.html", ".nojekyll", "config/"],
-                    cwd=str(PROJECT_ROOT),
-                    capture_output=True,
-                    timeout=5,
-                )
-                subprocess.run(
-                    ["git", "commit", "-m", "chore(gateway): auto-sync live tunnel endpoint [skip ci]"],
-                    cwd=str(PROJECT_ROOT),
-                    capture_output=True,
-                    timeout=5,
-                )
-                subprocess.run(
-                    ["git", "push", "origin", "main"],
-                    cwd=str(PROJECT_ROOT),
-                    capture_output=True,
-                    timeout=10,
-                )
-                subprocess.run(
-                    ["git", "checkout", "gh-pages"],
-                    cwd=str(PROJECT_ROOT),
-                    capture_output=True,
-                    timeout=5,
-                )
-                subprocess.run(
-                    ["git", "merge", "main", "--no-edit"],
-                    cwd=str(PROJECT_ROOT),
-                    capture_output=True,
-                    timeout=5,
-                )
-                subprocess.run(
-                    ["git", "push", "origin", "gh-pages"],
-                    cwd=str(PROJECT_ROOT),
-                    capture_output=True,
-                    timeout=10,
-                )
-                subprocess.run(
-                    ["git", "checkout", "main"],
-                    cwd=str(PROJECT_ROOT),
-                    capture_output=True,
-                    timeout=5,
-                )
-            except Exception:
-                pass
+                # Never touch the working tree if a merge/rebase is already in progress.
+                git_dir = PROJECT_ROOT / ".git"
+                if (git_dir / "MERGE_HEAD").exists() or (git_dir / "rebase-merge").exists():
+                    print("[TUNNEL] Gateway sync skipped: repo is mid-merge.")
+                    return
+
+                _run(["add", "docs/endpoint.json", "docs/index.html", "endpoint.json",
+                      "index.html", ".nojekyll"], timeout=8)
+                commit = _run(["commit", "-m",
+                               "chore(gateway): auto-sync live tunnel endpoint [skip ci]"], timeout=8)
+                # Nothing staged is fine: endpoint file may already be identical.
+                if commit.returncode != 0 and b"nothing to commit" not in (commit.stdout or b""):
+                    print(f"[TUNNEL] Gateway commit notice: {commit.stdout.decode(errors='ignore').strip()}")
+
+                for ref in ("main", "gh-pages"):
+                    push = _run(["push", "origin", f"HEAD:{ref}"], timeout=20)
+                    if push.returncode != 0:
+                        err = (push.stderr or b"").decode(errors="ignore").strip()
+                        print(f"[TUNNEL] Gateway push to {ref} failed: {err[:200]}")
+            except Exception as exc:
+                print(f"[TUNNEL] Gateway push notice: {exc}")
 
         threading.Thread(target=_git_push, name="jarvis-git-sync", daemon=True).start()
     except Exception as exc:

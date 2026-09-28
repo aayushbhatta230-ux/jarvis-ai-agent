@@ -385,7 +385,7 @@
         Tap <strong>Share &rarr; Add to Home Screen</strong> in Safari.<br>
         No domain purchase required &mdash; connects via free secure relay.
       </p>
-      <p class="footer-version">JARVIS GATEWAY v2.2 &bull; Free Relay</p>
+      <p class="footer-version">JARVIS GATEWAY v3.0 &bull; Secure Relay</p>
     </div>
   </div>
 
@@ -481,17 +481,18 @@
           const candidates = [
             data.tunnel_url,
             data.permanent_url,
-            'https://soa-art-facial-intellectual.trycloudflare.com'
-          ].filter(u => u && typeof u === 'string' && u.startsWith('https://') && !u.includes('aayushifty.com') && !u.includes('promising-thu-adjust-hospital'));
+            localStorage.getItem('jarvis_last_good_url')
+          ].filter(u => u && typeof u === 'string' && u.startsWith('https://') && !u.includes('aayushifty.com'));
 
           for (const cand of candidates) {
             setStatus('connecting', 'Verifying tunnel\u2026', cand.replace('https://', ''));
             const isHealthy = await checkEndpointHealth(cand);
             if (isHealthy) {
               activeUrl = cand;
+              try { localStorage.setItem('jarvis_last_good_url', cand); } catch (_) {}
               launchBtn.href = activeUrl;
               launchBtn.classList.remove('loading');
-              setStatus('online', 'JARVIS Online', 'Free Cloudflare relay active');
+              setStatus('online', 'JARVIS Online', 'Secure relay active');
               subtitle.textContent = 'PC companion connected \u2014 opening';
               retryBtn.style.display = 'none';
               setTimeout(() => executeRedirect(activeUrl), 500);
@@ -541,9 +542,35 @@
     });
 
     if (btnLanConnect) {
-      btnLanConnect.addEventListener('click', () => {
-        const lanUrl = 'http://169.254.240.253:8765';
-        executeRedirect(lanUrl);
+      btnLanConnect.addEventListener('click', async () => {
+        // Probe the PC over the local Wi-Fi/LAN. Works over http:// on the same network
+        // (voice input over plain http:// is blocked by iOS, so the tunnel stays preferred).
+        btnLanConnect.disabled = true;
+        const original = btnLanConnect.innerHTML;
+        btnLanConnect.innerHTML = '<span>\u23F3</span> Scanning local network\u2026';
+        const guesses = [
+          'http://192.168.1.68:8765',
+          'http://192.168.1.1:8765',
+          'http://127.0.0.1:8765',
+          'http://localhost:8765'
+        ];
+        try {
+          for (const url of guesses) {
+            const ok = await checkEndpointHealth(url);
+            if (ok) {
+              try { localStorage.setItem('jarvis_last_good_url', url); } catch (_) {}
+              btnLanConnect.innerHTML = '<span>\u2705</span> Found ' + url;
+              setTimeout(() => executeRedirect(url), 400);
+              return;
+            }
+          }
+          setStatus('offline', 'No LAN relay found', 'Enter your PC IP manually below');
+          subtitle.textContent = 'Use the custom URL option with your PC IP';
+          if (customUrlBox) customUrlBox.style.display = 'flex';
+        } finally {
+          btnLanConnect.disabled = false;
+          setTimeout(() => { btnLanConnect.innerHTML = original; }, 2500);
+        }
       });
     }
 
