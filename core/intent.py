@@ -16,8 +16,8 @@ class IntentResult:
     intent: str
     sub_intent: str
     confidence: float
-    needs_confirmation: bool
-    rationale: str
+    needs_confirmation: bool = False
+    rationale: str = ""
     suggestions: list[str] = field(default_factory=list)
     extracted_entities: dict[str, Any] = field(default_factory=dict)
 
