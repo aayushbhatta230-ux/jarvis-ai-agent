@@ -1,0 +1,21 @@
+{
+  "name": "Aayush Bhatta | AI Engineer Portfolio",
+  "short_name": "Aayush Bhatta",
+  "description": "AI Engineer specializing in LLMs, computer vision, voice AI, and full-stack development. Creator of JARVIS.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#58a6ff",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["technology", "developer", "portfolio"],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
