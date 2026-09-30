@@ -49,6 +49,9 @@ _load_dotenv()
 # Local contacts registry (can be extended)
 CONTACTS_FILE = Path(__file__).resolve().parent.parent / "memory" / "contacts.json"
 DRAFTS_FILE = Path(__file__).resolve().parent.parent / "memory" / "drafts.json"
+# Holds user/server only. The password is never written here; it comes from
+# JARVIS_GMAIL_APP_PASSWORD in the environment.
+EMAIL_CONFIG_FILE = Path(__file__).resolve().parent.parent / "memory" / "email_config.json"
 
 
 @dataclass
@@ -228,7 +231,7 @@ def _get_email_config() -> dict[str, str] | None:
         }
 
     # Fallback: config file for user/server, but password MUST come from env
-    config_file = Path(__file__).resolve().parent.parent / "memory" / "email_config.json"
+    config_file = EMAIL_CONFIG_FILE
     if config_file.exists():
         try:
             config = json.loads(config_file.read_text(encoding="utf-8"))

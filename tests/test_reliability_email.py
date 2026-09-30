@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
 import smtplib
-from pathlib import Path
 
 import pytest
 
@@ -22,8 +20,18 @@ def _setup_email_env(monkeypatch):
     yield
 
 
-def test_email_diagnostics_reports_configuration_without_secret():
+def test_email_diagnostics_reports_configuration_without_secret(tmp_path, monkeypatch):
+    from tools import email as email_tools
     from tools.email import diagnostics, diagnostics_dict
+
+    # Isolate from any real, machine-local email config.
+    config_file = tmp_path / "email_config.json"
+    config_file.write_text(
+        json.dumps({"user": "aayushbhatta230@gmail.com", "smtp_server": "smtp.gmail.com"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(email_tools, "EMAIL_CONFIG_FILE", config_file)
+
     d = diagnostics_dict()
     assert d["configured"] is True
     assert d["provider"] == "Gmail"
@@ -31,9 +39,8 @@ def test_email_diagnostics_reports_configuration_without_secret():
     text = diagnostics()
     assert "aayushbhatta230@gmail.com" in text
     assert "smtp.gmail.com" in text
-    config = json.loads(Path("memory/email_config.json").read_text(encoding="utf-8"))
     # Password should never be in the config file
-    assert "password" not in config
+    assert "password" not in json.loads(config_file.read_text(encoding="utf-8"))
     # Password should never be in diagnostics output
     assert "test_app_password_123" not in text
 
