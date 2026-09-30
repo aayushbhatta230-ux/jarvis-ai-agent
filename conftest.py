@@ -48,6 +48,11 @@ OPTIONAL_MODULES = (
 )
 
 
+# Dunders that must genuinely be absent. If these resolved, Python would
+# treat a stub as a real class and break ``class X(StubBase)`` resolution.
+_BLOCKED_DUNDERS = frozenset({"__mro_entries__", "__bases__", "__base__"})
+
+
 class _Stub(types.ModuleType):
     """A module whose every attribute access yields another stub.
 
@@ -57,14 +62,18 @@ class _Stub(types.ModuleType):
     """
 
     def __getattr__(self, name: str):
-        if name.startswith("__") and name.endswith("__"):
+        if name in _BLOCKED_DUNDERS:
             raise AttributeError(name)
+        # Some libraries compare __version__ against a string at import time
+        # (pyscreeze does), so hand back a real value rather than a stub.
+        if name == "__version__":
+            return "0.0.0"
         stub = _Stub(f"{self.__name__}.{name}")
         setattr(self, name, stub)
         return stub
 
     def __call__(self, *args, **kwargs):
-        return _Stub(self.__name__)
+        return _Stub(f"{self.__name__}()")
 
 
 _STUBBED_ROOTS: set[str] = set()
