@@ -1,189 +1,859 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#0d1117">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="JARVIS">
-<title>JARVIS</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#030408">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="JARVIS">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="description" content="JARVIS - Advanced Personal AI Command System">
+  <title>JARVIS &mdash; Quantum Neural Interface</title>
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css?v=2026.09.28.01">
 </head>
-<body>
-<div id="app">
-	<!-- Header / Status Bar -->
-	<header class="hud-header" role="banner">
-		<div class="header-left">
-			<div class="logo" aria-hidden="true">
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
-					<polygon points="5 3 19 12 5 21 5 3"></polygon>
-				</svg>
-				<span class="logo-text">JARVIS</span>
-			</div>
-		</div>
-		<div class="header-center">
-			<div id="stateIndicator" class="state-indicator" aria-live="polite" aria-atomic="true">
-				<span class="state-dot" aria-hidden="true"></span>
-				<span id="stateText">Initializing…</span>
-			</div>
-		</div>
-		<div class="header-right">
-			<button id="micBtn" class="icon-btn mic-btn" aria-label="Toggle microphone" aria-pressed="false" title="Microphone (M)">
-				<svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-					<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-					<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-					<line x1="12" y1="19" x2="12" y2="22"></line>
-				</svg>
-				<svg class="mic-muted-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" style="display:none">
-					<path d="M9 1v3a3 3 0 0 1-3 3v8a3 3 0 0 1 3 3v3"></path>
-					<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-					<line x1="1" y1="1" x2="23" y2="23"></path>
-				</svg>
-			</button>
-			<button id="settingsBtn" class="icon-btn" aria-label="Settings" title="Settings (S)">
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-					<circle cx="12" cy="12" r="3"></circle>
-					<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-				</svg>
-			</button>
-		</div>
-	</header>
+<body data-state="offline" data-theme="dark" data-view="brain">
+  <audio id="phoneAudioPlayer" preload="auto" playsinline webkit-playsinline></audio>
 
-	<!-- Main Conversation Area -->
-	<main class="hud-main" role="main">
-		<div id="conversation" class="conversation" aria-live="polite" aria-atomic="false">
-			<!-- Messages injected here -->
-		</div>
-		<div id="typingIndicator" class="typing-indicator" aria-hidden="true">
-			<span class="typing-dot"></span>
-			<span class="typing-dot"></span>
-			<span class="typing-dot"></span>
-		</div>
-	</main>
+  <div class="grid-lines" aria-hidden="true"></div>
 
-	<!-- Input Bar -->
-	<footer class="hud-footer" role="contentinfo">
-		<div class="input-wrapper">
-			<button id="attachBtn" class="icon-btn" aria-label="Attach file" title="Attach (A)">
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20">
-					<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.49"></path>
-				</svg>
-			</button>
-			<div class="input-field-container">
-				<textarea
-					id="textInput"
-					class="text-input"
-					placeholder="Type a command…"
-					rows="1"
-					aria-label="Command input"
-					spellcheck="false"
-					autocomplete="off"
-					autocorrect="off"
-					autocapitalize="off"
-					enterkeyhint="send"
-				></textarea>
-			</div>
-			<button id="sendBtn" class="icon-btn send-btn" aria-label="Send command" title="Send (Enter)">
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
-					<line x1="22" y1="2" x2="11" y2="13"></line>
-					<polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-				</svg>
-			</button>
-		</div>
-		<div class="footer-hints" aria-hidden="true">
-			<kbd>Enter</kbd> Send · <kbd>M</kbd> Mic · <kbd>S</kbd> Settings
-		</div>
-	</footer>
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="brand" id="brandLogo">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="30" height="30">
+          <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M24 6 L24 42 M6 24 L42 24 M12 12 L36 36 M36 12 L12 34"
+                stroke="currentColor" stroke-width="1.1" opacity="0.6"/>
+          <circle cx="24" cy="24" r="7" fill="none" stroke="#00e5ff" stroke-width="1.6"/>
+          <circle cx="24" cy="24" r="2.2" fill="#00e5ff"/>
+        </svg>
+      </span>
+      <span class="brand-copy">
+        <strong>JARVIS</strong>
+      </span>
+    </div>
 
-	<!-- Settings Modal -->
-	<div id="settingsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
-		<div class="modal-backdrop" tabindex="-1"></div>
-		<div class="modal-content">
-			<header class="modal-header">
-				<h2 id="settingsTitle">Settings</h2>
-				<button class="modal-close" aria-label="Close settings">&times;</button>
-			</header>
-			<div class="modal-body">
-				<section class="settings-section">
-					<h3>Voice</h3>
-					<label class="setting-row">
-						<span>Auto Listen</span>
-						<input type="checkbox" id="autoListenSetting" role="switch">
-					</label>
-					<label class="setting-row">
-						<span>Barge-in (interrupt while speaking)</span>
-						<input type="checkbox" id="bargeInSetting" role="switch">
-					</label>
-					<label class="setting-row">
-						<span>PC Speaker Output</span>
-						<input type="checkbox" id="pcSpeakerSetting" role="switch">
-					</label>
-					<label class="setting-row">
-						<span>Response Verbosity</span>
-						<select id="verbositySetting">
-							<option value="concise">Concise</option>
-							<option value="normal">Normal</option>
-							<option value="detailed">Detailed</option>
-						</select>
-					</label>
-				</section>
-				<section class="settings-section">
-					<h3>Visual</h3>
-					<label class="setting-row">
-						<span>Theme</span>
-						<select id="themeSetting">
-							<option value="dark">Dark</option>
-							<option value="light">Light</option>
-							<option value="system">System</option>
-						</select>
-					</label>
-					<label class="setting-row">
-						<span>Visual Intensity</span>
-						<input type="range" id="intensitySetting" min="0" max="1" step="0.1" value="0.7">
-					</label>
-				</section>
-				<section class="settings-section">
-					<h3>Permissions</h3>
-					<label class="setting-row">
-						<span>Permission Level</span>
-						<select id="permissionSetting">
-							<option value="OFF">Off</option>
-							<option value="OBSERVE_ONLY">Observe Only</option>
-							<option value="CONTROL_WITH_CONFIRMATION">Control with Confirmation</option>
-							<option value="FULL_CONTROL">Full Control</option>
-						</select>
-					</label>
-				</section>
-			</div>
-		</div>
-	</div>
+    <!-- Center: State Pill -->
+    <div class="header-center">
+      <div class="state-pill" id="statePill">
+        <span class="state-dot"></span>
+        <span id="coreStateLabel">Offline</span>
+      </div>
+    </div>
 
-	<!-- Confirmation Modal -->
-	<div id="confirmModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" hidden>
-		<div class="modal-backdrop" tabindex="-1"></div>
-		<div class="modal-content confirm-modal">
-			<header class="modal-header">
-				<h2 id="confirmTitle">Confirm Action</h2>
-			</header>
-			<div class="modal-body">
-				<p id="confirmDescription"></p>
-				<div id="confirmDetails" class="confirm-details"></div>
-			</div>
-			<footer class="modal-footer">
-				<button id="confirmCancel" class="btn btn-secondary">Cancel</button>
-				<button id="confirmOk" class="btn btn-danger">Confirm</button>
-			</footer>
-		</div>
-	</div>
+    <!-- Right: 3-Dot Menu -->
+    <div class="header-actions">
+      <button class="menu-dots-btn" id="menuButton" type="button" aria-label="Menu" title="Menu">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <circle cx="12" cy="5" r="2"/>
+          <circle cx="12" cy="12" r="2"/>
+          <circle cx="12" cy="19" r="2"/>
+        </svg>
+      </button>
+    </div>
 
-	<!-- Toast Container -->
-	<div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
-</div>
+    <!-- Floating Dropdown Menu -->
+    <div class="hud-dropdown-menu" id="hudMenu" hidden>
+      <div class="menu-header">NAVIGATION</div>
+      <button type="button" class="menu-item active" data-nav="brain">
+        <span class="menu-icon">&#129504;</span>
+        <span class="menu-text"><strong>Core</strong><small>Arc reactor interface</small></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="chat">
+        <span class="menu-icon">&#128172;</span>
+        <span class="menu-text"><strong>Chat</strong><small>Messages &amp; text input</small></span>
+        <span class="menu-unread-dot" id="chatMenuUnread" hidden></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="screen">
+        <span class="menu-icon">&#128248;</span>
+        <span class="menu-text"><strong>Screen</strong><small>PC desktop preview</small></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="remote">
+        <span class="menu-icon">&#127918;</span>
+        <span class="menu-text"><strong>PC Controls</strong><small>Hardware &amp; media remote</small></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="files">
+        <span class="menu-icon">&#128193;</span>
+        <span class="menu-text"><strong>Files</strong><small>Browse &amp; read code</small></span>
+      </button>
+      <div class="menu-divider"></div>
+      <button type="button" class="menu-item" id="menuBtnRemote">
+        <span class="menu-icon">&#128241;</span>
+        <span class="menu-text"><strong>Remote Access</strong><small>QR &amp; tunnel</small></span>
+      </button>
+      <button type="button" class="menu-item" id="menuBtnNeural">
+        <span class="menu-icon">&#129504;</span>
+        <span class="menu-text"><strong>Neural Intelligence</strong><small>Vector memory &amp; telemetry</small></span>
+      </button>
+      <button type="button" class="menu-item" id="menuBtnSettings">
+        <span class="menu-icon">&#9881;&#65039;</span>
+        <span class="menu-text"><strong>Settings</strong><small>Audio &amp; preferences</small></span>
+      </button>
+    </div>
+  </header>
+ 
+  <!-- Secure Context Warning Banner (for iOS Safari on HTTP) -->
+  <aside class="https-alert-banner" id="httpsAlertBanner" hidden>
+    <span>🔒 iPhone mic requires HTTPS: <a id="httpsTunnelLink" href="#">Tap here to switch to Secure Tunnel</a></span>
+  </aside>
 
-<script type="module" src="app.js"></script>
+  <!-- Main Viewport -->
+  <main class="assistant-stage">
+
+    <div class="stage-panels">
+      <!-- VIEW 1: BRAIN — Arc Reactor Core -->
+      <section class="view-panel view-brain active" id="viewBrain" aria-label="JARVIS Core">
+        <div class="core-container" id="coreContainer">
+          <canvas id="neuralCanvas" width="460" height="460" aria-label="JARVIS Arc Reactor"></canvas>
+        </div>
+
+        <div class="core-voice-controls" id="coreVoiceControls">
+          <!-- Real-Time Neural Soundwave / Spectrum Visualizer -->
+          <div class="voice-spectrum-container" id="voiceSpectrumContainer" aria-hidden="true">
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+            <div class="voice-spectrum-bar"></div>
+          </div>
+          <div class="live-transcript" id="liveTranscript" hidden></div>
+          <div class="core-response-bubble" id="coreResponseBubble" hidden></div>
+          <p class="core-state-text" id="stateDetail">Listening continuously…</p>
+          <div class="voice-mode-row">
+            <button type="button" class="btn-voice-toggle active" id="btnVoiceToggle" title="Toggle hands-free continuous listening">
+              <span class="mic-dot-pulse"></span> <span id="voiceToggleLabel">Hands-Free Mic Active</span>
+            </button>
+          </div>
+          <button type="button" class="btn-activate-voice" id="btnActivateVoice" hidden>
+            <span class="mic-dot-pulse"></span> Tap to Enable Hands-Free Voice
+          </button>
+
+          <!-- Natural Voice Command Suggestions -->
+          <div class="core-prompt-chips">
+            <button type="button" class="core-chip" data-cmd="what do you see on my pc">&#128248; What's on my PC?</button>
+            <button type="button" class="core-chip" data-cmd="click on file">&#128194; Click File Menu</button>
+            <button type="button" class="core-chip" data-cmd="start a new convo">&#9889; New Conversation</button>
+            <button type="button" class="core-chip" data-cmd="switch to chrome">&#127760; Switch to Chrome</button>
+            <button type="button" class="core-chip" data-cmd="list files">&#128193; Browse Files</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 2: CHAT -->
+      <section class="view-panel view-chat" id="viewChat" aria-label="Chat">
+        <div class="section-header">
+          <button type="button" class="btn-back-pill" id="btnBackFromChat">&#8592; Core</button>
+          <div class="section-title">
+            <span>&#128172; Messages</span>
+            <small id="chatCountBadge">0</small>
+          </div>
+          <div class="header-action-group">
+            <button type="button" class="btn-text-action" id="btnClearChat">Clear</button>
+            <button type="button" class="btn-close-chat" id="btnCloseChat" title="Close Chat">&#10005; Close</button>
+          </div>
+        </div>
+
+        <div class="messages" id="messages" role="log" aria-live="polite"></div>
+
+        <div class="quick-chips" id="quickChips">
+          <button type="button" class="quick-chip" data-cmd="system diagnostics">&#128202; System Health</button>
+          <button type="button" class="quick-chip" data-cmd="clean cache">&#129529; Clean Cache</button>
+          <button type="button" class="quick-chip" data-cmd="what did i download recently">&#128229; Recent Downloads</button>
+          <button type="button" class="quick-chip" data-cmd="show my notes">&#128221; Notes</button>
+          <button type="button" class="quick-chip" data-cmd="what do you remember about me">&#129504; Neural Recall</button>
+          <button type="button" class="quick-chip" data-cmd="files">&#128193; All Files</button>
+          <button type="button" class="quick-chip" data-cmd="read test_dom.js">&#128196; test_dom.js</button>
+          <button type="button" class="quick-chip" data-cmd="play lofi on youtube music">&#127925; YouTube Music</button>
+          <button type="button" class="quick-chip" data-action="volume_up">&#128266; Vol +</button>
+          <button type="button" class="quick-chip" data-action="volume_down">&#128265; Vol &minus;</button>
+          <button type="button" class="quick-chip" data-action="play_pause">&#9199; Play/Pause</button>
+          <button type="button" class="quick-chip" data-action="show_desktop">&#128451;&#65039; Desktop</button>
+          <button type="button" class="quick-chip" data-action="lock_pc">&#128274; Lock PC</button>
+          <button type="button" class="quick-chip" data-cmd="what is on my screen">&#128248; What's on screen?</button>
+          <button type="button" class="quick-chip" data-cmd="Open Google Chrome">&#127760; Chrome</button>
+          <button type="button" class="quick-chip" data-cmd="Stop speaking">&#9209;&#65039; Stop</button>
+        </div>
+      </section>
+
+      <!-- VIEW 3: PC SCREEN (LIVE MIRRORING & REMOTE CONTROL) -->
+      <section class="view-panel view-screen" id="viewScreen" aria-label="PC Screen">
+        <div class="section-header">
+          <button type="button" class="btn-back-pill" id="btnBackFromScreen">&#8592; Core</button>
+          <div class="section-title">
+            <span>&#128187; Live PC Mirror</span>
+            <small id="screenTimestamp" class="live-pulse-badge">&#9679; LIVE</small>
+          </div>
+          <div class="header-action-group">
+            <button type="button" class="btn-mode-pill" id="btnStreamMode" title="Toggle Turbo Frame mode vs Stream">&#9889; Turbo</button>
+            <button type="button" class="btn-primary-small btn-maximize-pill" id="btnMaximizeScreen" title="Maximize Screen Mirror">
+              <span>&#x26F6;</span> Full
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Detected Tabs & Windows Ribbon -->
+        <div class="screen-ribbon-container">
+          <div class="screen-tabs-ribbon" id="screenTabsRibbon">
+            <span class="ribbon-chip-placeholder">Scanning open tabs…</span>
+          </div>
+        </div>
+
+        <!-- Interactive Screen Container -->
+        <div class="screen-preview-wrapper" id="screenWrapper">
+          <img id="pcScreenImg" class="screen-image" src="/latest_screenshot.png" alt="Live PC Mirror"
+               onerror="this.src='/latest_screenshot.png?t=' + Date.now();"
+               onload="var ph = document.getElementById('screenPlaceholder'); if (ph) ph.style.display='none';">
+          <div class="screen-overlay-bar">
+            <span class="screen-zoom-badge" id="zoomBadge">1.0x</span>
+            <button type="button" class="screen-overlay-btn" id="btnZoomIn">&#128269; +</button>
+            <button type="button" class="screen-overlay-btn" id="btnZoomOut">&#128269; &minus;</button>
+            <button type="button" class="screen-overlay-btn" id="btnZoomReset">1:1</button>
+            <button type="button" class="screen-overlay-btn" id="btnToggleStream">&#9208; Pause</button>
+          </div>
+          <div class="screen-tap-hint">Tap: Click &bull; 2-Finger / Swipe: Scroll &bull; Long Press: Right Click &bull; Double Tap: 2x Click</div>
+          <div class="screen-placeholder" id="screenPlaceholder" style="display:none;">
+            <div class="placeholder-icon">&#128187;</div>
+            <strong>Connecting to live desktop…</strong>
+            <p>Direct live mirror connecting</p>
+          </div>
+        </div>
+
+        <!-- Ergonomic Floating Touch Dock for Mobile -->
+        <div class="screen-touch-dock" id="screenTouchDock">
+          <button type="button" class="touch-dock-btn active" id="btnTouchLeftClick" data-touch-action="left_click">
+            <span class="dock-btn-icon">&#128070;</span>
+            <span class="dock-btn-label">Left</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnTouchRightClick" data-touch-action="right_click">
+            <span class="dock-btn-icon">&#128433;&#65039;</span>
+            <span class="dock-btn-label">Right</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnTouchDblClick" data-touch-action="double_click">
+            <span class="dock-btn-icon">&#9996;&#65039;</span>
+            <span class="dock-btn-label">2x Click</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnDockScrollUp" data-touch-action="scroll_up">
+            <span class="dock-btn-icon">&#9650;</span>
+            <span class="dock-btn-label">Scroll Up</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnDockScrollDown" data-touch-action="scroll_down">
+            <span class="dock-btn-icon">&#9660;</span>
+            <span class="dock-btn-label">Scroll Dn</span>
+          </button>
+          <button type="button" class="touch-dock-btn" id="btnToggleVirtualKeyboard" title="Open Virtual Keyboard">
+            <span class="dock-btn-icon">&#9000;</span>
+            <span class="dock-btn-label">Keys</span>
+          </button>
+        </div>
+
+        <!-- Virtual Keyboard & Text Sending Drawer -->
+        <div class="virtual-key-drawer" id="virtualKeyDrawer" hidden>
+          <div class="drawer-input-row">
+            <input type="text" id="pcKeyboardInput" placeholder="Type text to send to active PC window..." autocomplete="off">
+            <button type="button" class="btn-send-keys" id="btnSendKeyText">Send &#9166;</button>
+          </div>
+          <div class="drawer-keys-row">
+            <button type="button" class="v-key" data-key="enter">&#9166; Enter</button>
+            <button type="button" class="v-key" data-key="backspace">&#9003; Bksp</button>
+            <button type="button" class="v-key" data-key="escape">Esc</button>
+            <button type="button" class="v-key" data-key="tab">&#8677; Tab</button>
+            <button type="button" class="v-key" data-key="space">&#9251; Space</button>
+            <button type="button" class="v-key" data-key="win">&#8862; Win</button>
+            <button type="button" class="v-key" data-key="up">&#9650;</button>
+            <button type="button" class="v-key" data-key="down">&#9660;</button>
+            <button type="button" class="v-key" data-key="left">&#9664;</button>
+            <button type="button" class="v-key" data-key="right">&#9654;</button>
+            <button type="button" class="v-key" data-cmd="Ctrl+C">Copy</button>
+            <button type="button" class="v-key" data-cmd="Ctrl+V">Paste</button>
+            <button type="button" class="v-key" data-cmd="Ctrl+Z">Undo</button>
+            <button type="button" class="v-key" data-cmd="Ctrl+A">All</button>
+          </div>
+        </div>
+
+        <!-- Screen Quick Commands Bar -->
+        <div class="screen-quick-bar">
+          <button type="button" class="screen-action-chip" data-cmd="what do you see on my pc">&#128248; What's on PC?</button>
+          <button type="button" class="screen-action-chip" data-cmd="click on file">&#128194; Click File</button>
+          <button type="button" class="screen-action-chip" data-cmd="click on edit">&#9999;&#65039; Click Edit</button>
+          <button type="button" class="screen-action-chip" data-cmd="start a new convo">&#9889; New Convo</button>
+          <button type="button" class="screen-action-chip" data-action="show_desktop">&#128451;&#65039; Desktop</button>
+          <button type="button" class="screen-action-chip" data-action="locate_laptop">&#128205; Find PC</button>
+          <button type="button" class="screen-action-chip" data-action="lock_pc">&#128274; Lock PC</button>
+        </div>
+      </section>
+
+      <!-- VIEW 4: REMOTE PC CONTROL -->
+      <section class="view-panel view-remote" id="viewRemote" aria-label="Remote PC Controls">
+        <div class="section-header">
+          <button type="button" class="btn-back-pill" id="btnBackFromRemote">&#8592; Core</button>
+          <div class="section-title">
+            <span>&#127918; Remote PC Control</span>
+            <small>Direct Hardware</small>
+          </div>
+          <button type="button" class="btn-primary-small" id="btnCaptureScreenFromRemote">
+            <span class="refresh-icon">&#128248;</span> Screen
+          </button>
+        </div>
+
+        <div class="remote-control-container">
+          <!-- Audio & Volume Card -->
+          <div class="remote-card">
+            <div class="remote-card-header">
+              <span class="remote-card-icon">&#128266;</span>
+              <strong>Audio &amp; Volume</strong>
+            </div>
+            <div class="remote-btn-row">
+              <button type="button" class="remote-btn" data-action="volume_up">&#128266; Vol +</button>
+              <button type="button" class="remote-btn" data-action="volume_down">&#128265; Vol &minus;</button>
+              <button type="button" class="remote-btn" data-action="mute">&#128263; Mute</button>
+            </div>
+          </div>
+
+          <!-- Media Playback Card -->
+          <div class="remote-card">
+            <div class="remote-card-header">
+              <span class="remote-card-icon">&#127925;</span>
+              <strong>Media Playback</strong>
+            </div>
+            <div class="remote-btn-row">
+              <button type="button" class="remote-btn" data-action="prev_track">&#9198; Prev</button>
+              <button type="button" class="remote-btn" data-action="play_pause">&#9199; Play/Pause</button>
+              <button type="button" class="remote-btn" data-action="next_track">&#9197; Next</button>
+            </div>
+          </div>
+
+          <!-- Windows & Desktop Card -->
+          <div class="remote-card">
+            <div class="remote-card-header">
+              <span class="remote-card-icon">&#128187;</span>
+              <strong>Windows &amp; Display</strong>
+            </div>
+            <div class="remote-btn-row">
+              <button type="button" class="remote-btn" data-action="show_desktop">&#128451;&#65039; Desktop</button>
+              <button type="button" class="remote-btn" data-action="switch_window">&#128260; Alt+Tab</button>
+              <button type="button" class="remote-btn" data-action="maximize_window">&#128470;&#65039; Maximize</button>
+              <button type="button" class="remote-btn btn-danger-soft" data-action="close_window">&#10005; Close</button>
+            </div>
+          </div>
+
+          <!-- Screen & Mouse Control Card -->
+          <div class="remote-card">
+            <div class="remote-card-header">
+              <span class="remote-card-icon">&#128433;&#65039;</span>
+              <strong>Screen &amp; Mouse Control</strong>
+            </div>
+            <div class="remote-btn-row">
+              <button type="button" class="remote-btn" data-action="click">&#128070; Click</button>
+              <button type="button" class="remote-btn" data-action="right_click">&#128433;&#65039; Right Click</button>
+              <button type="button" class="remote-btn" data-action="double_click">&#9996;&#65039; Double Click</button>
+              <button type="button" class="remote-btn" data-action="scroll_down">&#11015;&#65039; Scroll Down</button>
+              <button type="button" class="remote-btn" data-action="scroll_up">&#11014;&#65039; Scroll Up</button>
+            </div>
+          </div>
+
+          <!-- Screen Recording Card -->
+          <div class="remote-card">
+            <div class="remote-card-header">
+              <span class="remote-card-icon">&#127916;</span>
+              <strong>Screen Recording</strong>
+              <span id="recordingBadge" class="rec-badge" style="display:none;">● REC <span id="recTimer">00:00</span></span>
+            </div>
+            <div class="remote-btn-row">
+              <button type="button" class="remote-btn btn-rec" id="btnRecordToggle" data-action="toggle_recording">&#127916; Start Recording</button>
+              <button type="button" class="remote-btn" data-action="screenshot">&#128248; Screenshot</button>
+              <button type="button" class="remote-btn" data-cmd="read test_dom.js">&#128196; test_dom.js</button>
+            </div>
+          </div>
+
+          <!-- Laptop Locator & Security Card -->
+          <div class="remote-card">
+            <div class="remote-card-header">
+              <span class="remote-card-icon">&#128205;</span>
+              <strong>Locator &amp; Security</strong>
+            </div>
+            <div class="remote-btn-row">
+              <button type="button" class="remote-btn btn-highlight" data-action="locate_laptop" id="btnLocateLaptop">&#128227; Find Laptop (Alarm)</button>
+              <button type="button" class="remote-btn" data-action="lock_pc">&#128274; Lock PC</button>
+              <button type="button" class="remote-btn" data-action="sleep_pc">&#128164; Sleep PC</button>
+            </div>
+          </div>
+
+          <!-- Quick App Launchers -->
+          <div class="remote-card">
+            <div class="remote-card-header">
+              <span class="remote-card-icon">&#128640;</span>
+              <strong>Launch Applications</strong>
+            </div>
+            <div class="remote-btn-row">
+              <button type="button" class="remote-btn" data-action="open_app" data-app="chrome">&#127760; Chrome</button>
+              <button type="button" class="remote-btn" data-action="open_app" data-app="vscode">&#128187; VS Code</button>
+              <button type="button" class="remote-btn" data-action="open_app" data-app="notepad">&#128221; Notepad</button>
+              <button type="button" class="remote-btn" data-action="open_app" data-app="spotify">&#127925; Spotify</button>
+              <button type="button" class="remote-btn" data-action="open_app" data-app="calculator">&#128290; Calc</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- VIEW 5: FILES EXPLORER & VIEWER -->
+      <section class="view-panel view-files" id="viewFiles" aria-label="JARVIS Files Explorer">
+        <div class="section-header">
+          <button type="button" class="btn-back-pill" id="btnBackFromFiles">&#8592; Core</button>
+          <div class="section-title">
+            <span>&#128193; File Explorer</span>
+            <small id="filesCountBadge">0 files</small>
+          </div>
+          <div class="header-action-group">
+            <button type="button" class="btn-text-action" id="btnRefreshFiles">&#8635; Refresh</button>
+          </div>
+        </div>
+
+        <div class="files-folder-chips" id="filesFolderChips">
+          <button type="button" class="folder-chip active" data-folder="">Workspace</button>
+          <button type="button" class="folder-chip" data-folder="desktop">Desktop</button>
+          <button type="button" class="folder-chip" data-folder="downloads">Downloads</button>
+          <button type="button" class="folder-chip" data-folder="documents">Documents</button>
+          <button type="button" class="folder-chip" data-folder="interface">Interface</button>
+          <button type="button" class="folder-chip" data-folder="core">Core</button>
+          <button type="button" class="folder-chip" data-folder="tools">Tools</button>
+        </div>
+
+        <div class="files-search-row">
+          <input type="search" id="filesSearchInput" placeholder="Filter files by name or extension…" autocomplete="off">
+        </div>
+
+        <!-- File Viewer Card (shown when a file is tapped) -->
+        <div class="file-viewer-card" id="fileViewerCard" hidden>
+          <div class="file-viewer-header">
+            <div class="file-viewer-meta">
+              <strong id="fileViewerName">file.ext</strong>
+              <small id="fileViewerSub">—</small>
+            </div>
+            <div class="file-viewer-actions">
+              <button type="button" class="file-action-btn" id="btnCopyFileContent" title="Copy Content">&#128203; Copy</button>
+              <button type="button" class="file-action-btn" id="btnOpenFileOnPC" title="Open on PC">&#128187; Open PC</button>
+              <button type="button" class="file-action-btn file-action-close" id="btnCloseFileViewer" title="Close">&#10005;</button>
+            </div>
+          </div>
+          <div class="file-viewer-summary" id="fileViewerSummary" hidden></div>
+          <pre class="file-viewer-code"><code id="fileViewerCode"></code></pre>
+        </div>
+
+        <!-- File List Grid / List -->
+        <div class="files-list-container" id="filesListContainer">
+          <div class="files-empty-state">Loading files…</div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- GLOBAL PERSISTENT COMMAND BAR (Visible on Core & Chat & Screen) -->
+    <form class="command-bar" id="commandForm">
+      <input id="commandInput" autocomplete="off" spellcheck="false"
+             placeholder="Message JARVIS or tap mic…" aria-label="Message JARVIS">
+      <button class="input-mic" type="button" id="inputMicButton" aria-label="Voice input" title="Tap to Speak">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+      </button>
+      <button class="send-button" type="submit" aria-label="Send message">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="22" y1="2" x2="11" y2="13"></line>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        </svg>
+        <span>Send</span>
+      </button>
+    </form>
+
+  </main>
+
+  <!-- FIXED BOTTOM DOCK NAVIGATION (Core, Chat, Screen, Controls) -->
+  <nav class="bottom-nav-dock" id="bottomNavDock" aria-label="Bottom Navigation">
+    <button type="button" class="nav-dock-item active" data-nav="brain" id="navDockCore">
+      <span class="nav-dock-icon">&#9883;&#65039;</span>
+      <span class="nav-dock-label">Core</span>
+    </button>
+    <button type="button" class="nav-dock-item" data-nav="chat" id="navDockChat">
+      <span class="nav-dock-icon">&#128172;</span>
+      <span class="nav-dock-label">Chat</span>
+      <span class="nav-dock-badge" id="navChatBadge" hidden>0</span>
+    </button>
+    <button type="button" class="nav-dock-item" data-nav="screen" id="navDockScreen">
+      <span class="nav-dock-icon">&#128187;</span>
+      <span class="nav-dock-label">Screen</span>
+    </button>
+    <button type="button" class="nav-dock-item" data-nav="remote" id="navDockRemote">
+      <span class="nav-dock-icon">&#127918;</span>
+      <span class="nav-dock-label">Controls</span>
+    </button>
+    <button type="button" class="nav-dock-item" data-nav="files" id="navDockFiles">
+      <span class="nav-dock-icon">&#128193;</span>
+      <span class="nav-dock-label">Files</span>
+    </button>
+  </nav>
+
+  <!-- PERSISTENT QUICK CONTROLS (mobile-first: volume + common actions) -->
+  <div class="quick-control-bar" id="quickControlBar" role="toolbar" aria-label="Quick controls">
+    <button type="button" class="qc-btn" data-action="volume_down" aria-label="Volume down">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <line x1="22" y1="9" x2="16" y2="15"></line><line x1="16" y1="9" x2="22" y2="15"></line>
+      </svg>
+    </button>
+    <div class="qc-level" id="qcVolumeLevel" aria-hidden="true"><i></i></div>
+    <button type="button" class="qc-btn" data-action="volume_up" aria-label="Volume up">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <line x1="15" y1="9" x2="19" y2="9"></line><line x1="17" y1="7" x2="17" y2="11"></line>
+        <line x1="19.5" y1="5.5" x2="22" y2="8"></line><line x1="22" y1="5.5" x2="19.5" y2="8"></line>
+      </svg>
+    </button>
+    <span class="qc-sep" aria-hidden="true"></span>
+    <button type="button" class="qc-btn" data-action="play_pause" aria-label="Play or pause media">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true">
+        <rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect>
+      </svg>
+    </button>
+    <button type="button" class="qc-btn" data-action="mute" aria-label="Mute">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <line x1="22" y1="9" x2="16" y2="15"></line><line x1="16" y1="9" x2="22" y2="15"></line>
+      </svg>
+    </button>
+    <button type="button" class="qc-btn" data-action="screenshot" aria-label="Take screenshot">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+        <circle cx="12" cy="13" r="4"></circle>
+      </svg>
+    </button>
+    <button type="button" class="qc-btn" data-action="lock_pc" aria-label="Lock PC">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+      </svg>
+    </button>
+    <button type="button" class="qc-btn qc-mic" id="qcMicBtn" data-action="toggle_mic" aria-label="Toggle hands-free mic" aria-pressed="true">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Voice Recording Overlay (appears on core tap) -->
+  <div class="voice-overlay" id="voiceOverlay" hidden>
+    <div class="voice-overlay-content">
+      <div class="voice-ripple" id="voiceRipple"></div>
+      <div class="voice-status" id="voiceStatus">Listening…</div>
+      <div class="voice-transcript" id="voiceTranscript"></div>
+      <div class="voice-btn-row">
+        <button type="button" class="voice-done-btn" id="voiceDoneBtn">Done Speaking</button>
+        <button type="button" class="voice-cancel-btn" id="voiceCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Drawer -->
+  <aside class="drawer settings-drawer" id="settingsDrawer" aria-hidden="true">
+    <div class="drawer-header">
+      <span>Settings</span>
+      <button class="close-button" id="closeSettings" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="drawer-body" id="settingsBody">
+      <label class="setting-row">
+        <span class="setting-copy"><strong>Auto-listen</strong><small>Continuous voice loop</small></span>
+        <input type="checkbox" id="setAutoListen">
+      </label>
+      <label class="setting-row">
+        <span class="setting-copy"><strong>Mic sensitivity</strong><small>Trigger threshold</small></span>
+        <input type="range" id="setSensitivity" min="0.4" max="2.5" step="0.1">
+      </label>
+      <label class="setting-row">
+        <span class="setting-copy"><strong>Response length</strong><small>Concise vs detailed</small></span>
+        <select id="setVerbosity">
+          <option value="concise">Concise</option>
+          <option value="normal">Balanced</option>
+          <option value="detailed">Detailed</option>
+        </select>
+      </label>
+      <label class="setting-row">
+        <span class="setting-copy"><strong>Barge-in interrupt</strong><small>Cut off speech on voice</small></span>
+        <input type="checkbox" id="setBargeIn">
+      </label>
+      <label class="setting-row">
+        <span class="setting-copy"><strong>Speak on this device</strong><small>Play voice on phone</small></span>
+        <input type="checkbox" id="setPhoneAudio">
+      </label>
+    </div>
+    <p class="drawer-note">Voice engine: Windows SAPI / Neural TTS.</p>
+  </aside>
+
+  <!-- History Drawer (hidden) -->
+  <aside class="drawer history-drawer" id="historyDrawer" aria-hidden="true">
+    <div class="drawer-header">
+      <span>History</span>
+      <button class="close-button" id="closeHistory" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="drawer-body" id="historyMessages"></div>
+  </aside>
+
+  <!-- Confirmation Modal -->
+  <div class="modal-overlay" id="confirmModal" aria-hidden="true" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+      <h2 id="confirmTitle">Confirmation needed</h2>
+      <p id="confirmDesc"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="confirmNo">Decline</button>
+        <button type="button" class="btn-primary" id="confirmYes">Proceed</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- iPhone Remote Modal -->
+  <div class="modal-overlay" id="iphoneModal" aria-hidden="true" hidden>
+    <div class="modal iphone-modal" role="dialog" aria-modal="true" aria-labelledby="iphoneTitle">
+      <div class="modal-header-row">
+        <h2 id="iphoneTitle">Remote Access</h2>
+        <button type="button" class="close-button" id="closeIphoneModal">&times;</button>
+      </div>
+      <p class="modal-subtitle">Control your PC from anywhere</p>
+
+      <div id="tunnelSection" class="tunnel-section" hidden>
+        <div class="method-badge tunnel-badge">&#127760; REMOTE HTTPS TUNNEL</div>
+        <div class="iphone-qr-container tunnel-highlight">
+          <div id="tunnelQrWrapper" class="qrcode-wrapper">
+            <canvas id="tunnelQrCanvas" width="160" height="160"></canvas>
+          </div>
+          <div class="qr-info">
+            <label>Remote URL:</label>
+            <div class="copy-url-row">
+              <input type="text" id="tunnelUrlInput" readonly value="">
+              <button type="button" class="btn-primary copy-btn" id="copyTunnelBtn">Copy</button>
+            </div>
+            <small class="qr-hint">HTTPS — open in Safari → Add to Home Screen.</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="local-section">
+        <div class="method-badge" id="localBadge">&#128246; SAME WI-FI</div>
+        <div class="iphone-qr-container">
+          <div id="qrcodeWrapper" class="qrcode-wrapper">
+            <canvas id="qrCanvas" width="160" height="160"></canvas>
+          </div>
+          <div class="qr-info">
+            <label>Local URL:</label>
+            <div class="copy-url-row">
+              <input type="text" id="mobileUrlInput" readonly value="">
+              <button type="button" class="btn-primary copy-btn" id="copyUrlBtn">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PERMANENT URL SECTION -->
+      <div class="permanent-section">
+        <div class="method-badge permanent-badge">&#11088; PERMANENT URL TO KEEP</div>
+        <div id="permanentActiveCard" class="permanent-active-card" hidden>
+          <div class="perm-status-row">
+            <span class="status-dot-active"></span>
+            <strong id="permStatusLabel">Permanent URL is active!</strong>
+          </div>
+          <div class="copy-url-row">
+            <input type="text" id="permanentUrlDisplay" readonly value="">
+            <button type="button" class="btn-primary copy-btn" id="copyPermBtn">Copy</button>
+          </div>
+          <small class="qr-hint">This URL never changes across restarts. Keep it on your iPhone Home Screen!</small>
+        </div>
+
+        <div class="permanent-config-card" id="permanentConfigCard">
+          <label><strong>Keep a Permanent Custom URL:</strong></label>
+          <p class="perm-help-text">
+            To keep a fixed URL forever, paste your free Cloudflare Tunnel Token or custom domain below:
+          </p>
+          <div class="perm-input-group">
+            <input type="text" id="permTokenInput" placeholder="Cloudflare Tunnel Token (eyJh...)" autocomplete="off">
+            <input type="text" id="permDomainInput" placeholder="Custom URL (e.g. https://jarvis.yourdomain.com)" autocomplete="off">
+            <button type="button" class="btn-primary" id="btnSavePermanent">Save &amp; Keep</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" id="dismissIphoneModal">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEURAL INTELLIGENCE & TELEMETRY MODAL -->
+  <div class="modal-overlay" id="neuralModal" aria-hidden="true" hidden>
+    <div class="modal neural-modal" role="dialog" aria-modal="true" aria-labelledby="neuralTitle">
+      <div class="modal-header-row">
+        <h2 id="neuralTitle">&#129504; Neural Core &amp; Telemetry</h2>
+        <button type="button" class="close-button" id="closeNeuralModal">&times;</button>
+      </div>
+      <p class="modal-subtitle">Real-time deep learning vector memory &amp; hardware health</p>
+
+      <!-- Hardware Telemetry Cards -->
+      <div class="telemetry-grid">
+        <div class="telem-card">
+          <span class="telem-label">CPU LOAD</span>
+          <strong class="telem-val" id="telemCpu">--%</strong>
+          <span class="telem-sub" id="telemCores">-- cores</span>
+        </div>
+        <div class="telem-card">
+          <span class="telem-label">RAM USED</span>
+          <strong class="telem-val" id="telemRam">--%</strong>
+          <span class="telem-sub" id="telemRamAvail">-- GB free</span>
+        </div>
+        <div class="telem-card">
+          <span class="telem-label">BATTERY</span>
+          <strong class="telem-val" id="telemBattery">--%</strong>
+          <span class="telem-sub" id="telemPower">--</span>
+        </div>
+        <div class="telem-card">
+          <span class="telem-label">STORAGE C:</span>
+          <strong class="telem-val" id="telemDisk">--%</strong>
+          <span class="telem-sub" id="telemDiskFree">-- GB free</span>
+        </div>
+      </div>
+
+      <!-- Neural Intelligence Section -->
+      <div class="neural-section">
+        <div class="method-badge">&#129504; DEEP LEARNING &amp; VECTOR RAG</div>
+        <div class="neural-stats-row">
+          <div class="stat-pill">Embedder: <strong id="neuralEmbedder">Local Neural Projector</strong></div>
+          <div class="stat-pill">Vectors: <strong id="neuralVectors">0</strong></div>
+          <div class="stat-pill">GPT Engine: <strong id="neuralGpt">Ollama LLaMA 3.2</strong></div>
+          <div class="stat-pill">Habits Learned: <strong id="neuralHabits">0</strong></div>
+        </div>
+        
+        <div class="memorize-box">
+          <label><strong>Memorize Fact or Preference:</strong></label>
+          <div class="memo-row">
+            <input type="text" id="memoInput" placeholder="e.g. My favorite editor is VS Code...">
+            <button type="button" class="btn-primary" id="btnMemorize">Store Vector</button>
+          </div>
+        </div>
+
+        <div class="training-row">
+          <button type="button" class="btn-secondary" id="btnRunTraining">&#9889; Run Neural Consolidation Cycle</button>
+          <span id="trainingStatus" class="training-status-text"></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" id="dismissNeuralModal">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FULLSCREEN MAXIMIZED DESKTOP MIRROR -->
+  <div class="maximized-screen-modal auto-landscape" id="screenMaximizedModal" hidden>
+    <!-- Always-Visible Floating Exit Pill Button -->
+    <button type="button" class="btn-floating-exit-mirror" id="btnFloatingExitMirror" title="Exit Mirror Mode">
+      &#10005; Exit Mirror
+    </button>
+    <!-- Top-Left Floating Quick Exit Icon -->
+    <button type="button" class="btn-quick-exit-corner" id="btnQuickExitCorner" title="Exit Fullscreen Mirror">
+      &larr; Exit
+    </button>
+
+    <div class="maximized-header">
+      <button type="button" class="maximized-close-btn" id="btnCloseMaximized">&larr; Exit</button>
+      <div class="maximized-status">
+        <span class="live-dot">&#9679;</span>
+        <strong>PC Mirror</strong>
+        <span class="maximized-fps" id="maximizedFps">Live</span>
+      </div>
+      <div class="maximized-actions">
+        <button type="button" class="max-btn" id="maxBtnToggleRotate" title="Toggle Landscape Rotation">&#128260; Landscape</button>
+        <button type="button" class="max-btn" id="maxBtnToggleTouchMode" title="Switch Touch Mode">&#128070; Scroll</button>
+        <button type="button" class="max-btn" id="maxBtnToggleClickMode" data-mode="left">&#128433;&#65039; Left</button>
+        <button type="button" class="max-btn" id="maxBtnToggleKeyboard">&#9000; Keys</button>
+      </div>
+    </div>
+
+    <!-- Floating Simultaneous Voice Bar in Fullscreen Mirror -->
+    <div class="maximized-voice-overlay" id="maxVoiceOverlay">
+      <button type="button" class="max-voice-btn" id="maxVoiceBtn" title="Speak to JARVIS">
+        <span class="mic-wave-icon">&#127908;</span>
+        <span id="maxVoiceText">Speak Command</span>
+      </button>
+      <div class="max-transcript-bubble" id="maxTranscriptBubble" hidden></div>
+    </div>
+
+    <!-- Active Touch Display Area -->
+    <div class="maximized-canvas-container" id="maximizedContainer">
+      <img id="maximizedScreenImg" class="maximized-screen-image" src="/api/screen/frame" alt="Maximized Screen">
+      <div id="touchFeedbackRipple" class="touch-feedback-ripple"></div>
+    </div>
+
+    <!-- Dedicated Floating Scroll HUD for iPhone 15 Touch Ergonomics -->
+    <div class="floating-scroll-hud" id="floatingScrollHud" aria-label="Screen Scroll Controls">
+      <button type="button" class="floating-scroll-btn" id="btnScrollUp" title="Scroll Up">
+        <span class="scroll-arrow">&#9650;</span>
+      </button>
+      <button type="button" class="floating-scroll-btn" id="btnScrollDown" title="Scroll Down">
+        <span class="scroll-arrow">&#9660;</span>
+      </button>
+    </div>
+
+    <!-- Quick Text Selection Actions Toolbar (appears when selecting text) -->
+    <div class="text-selection-toolbar" id="textSelectionToolbar" hidden>
+      <button type="button" class="sel-btn" id="btnSelCopy">&#128203; Copy</button>
+      <button type="button" class="sel-btn" id="btnSelCut">&#9986;&#65039; Cut</button>
+      <button type="button" class="sel-btn" id="btnSelPaste">&#128203; Paste</button>
+      <button type="button" class="sel-btn" id="btnSelSelectAll">&#128065; Select All</button>
+      <button type="button" class="sel-btn sel-btn-close" id="btnSelClose" title="Close Toolbar">&times;</button>
+    </div>
+
+    <!-- Floating Quick Bar for Keys and Controls -->
+    <div class="maximized-floating-bar" id="maximizedFloatingBar">
+      <div class="quick-keys-row">
+        <button type="button" class="mini-key mini-key-exit" id="btnBottomExit">&times; Exit</button>
+        <button type="button" class="mini-key" data-key="enter">&#9166; Enter</button>
+        <button type="button" class="mini-key" data-key="backspace">&#9003; Bksp</button>
+        <button type="button" class="mini-key" data-key="space">&#9251; Space</button>
+        <button type="button" class="mini-key" data-key="tab">&#8677; Tab</button>
+        <button type="button" class="mini-key" data-key="escape">Esc</button>
+        <button type="button" class="mini-key" data-action="volume_up">&#128266; Vol +</button>
+        <button type="button" class="mini-key" data-action="volume_down">&#128265; Vol &minus;</button>
+        <button type="button" class="mini-key" data-cmd="Ctrl+A">Select All</button>
+        <button type="button" class="mini-key" data-cmd="Ctrl+C">Copy</button>
+        <button type="button" class="mini-key" data-cmd="Ctrl+V">Paste</button>
+      </div>
+      <div class="quick-type-row" id="quickTypeRow" hidden>
+        <input type="text" id="maximizedTypeInput" placeholder="Type text to send to active PC window..." autocomplete="off">
+        <button type="button" id="btnMaximizedSendType">Send</button>
+      </div>
+      <div class="maximized-tip">
+        <span>&#128070; Swipe up/down to scroll &bull; Tap to click &bull; Toggle "Select" to drag &amp; highlight text</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- Hidden compat refs -->
+  <span id="backendLabel" style="display:none;">Offline</span>
+  <span id="backendChip" style="display:none;"></span>
+  <span id="micLabel" style="display:none;">Mic idle</span>
+  <span id="stateText" style="display:none;">JARVIS</span>
+
+  <script src="qr.js?v=2026.09.27.01"></script>
+  <script src="app.js?v=2026.09.28.01"></script>
 </body>
 </html>
