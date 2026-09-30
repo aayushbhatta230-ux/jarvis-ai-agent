@@ -63,6 +63,12 @@ temp/
 *.jpeg
 *.gif
 
+# Portfolio/PWA artwork must stay tracked
+!portfolio/og-image.png
+!portfolio/*.png
+!portfolio/*.jpg
+!portfolio/*.svg
+
 # Archives
 *.zip
 *.tar.gz
@@ -81,3 +87,24 @@ latest_screenshot.png
 recordings/
 database/
 config/settings.json
+
+# Runtime state written by the assistant (machine-local, never shared)
+memory/*.json
+!memory/.gitkeep
+
+# Tunnel tooling and credentials
+*.exe
+*.exe.old
+config/tunnel_token.txt
+config/tunnel_url.txt
+config/permanent_url.txt
+config/ngrok_domain.txt
+.ngrok/
+
+# One-off development scripts left in the repo root
+/fix_*.py
+/_fix_*.py
+/_diag.py
+/_probe.py
+/_probe_*.py
+/_fix_*.py
