@@ -1,73 +1,83 @@
-# Environment & Secrets
-.env
-.env.*
-!.env.example
-*.env
+# .gitignore
 
-# Local binary executables & tunnels
-*.exe
-*.dll
-*.so
-*.dylib
-.ngrok.exe.old
-cloudflared.exe
-ngrok.exe
-
-# Dynamic Runtime Tunnel and Config State
-config/tunnel_url.txt
-config/tunnel_token.txt
-config/ngrok_domain.txt
-config/permanent_url.txt
-
-# Personal User Memory, History & Databases
-memory/*.json
-memory/*.db
-memory/screenshots/
-database/*.db
-database/*.sqlite*
-database/*.json
-
-# Virtual Environments
-.venv/
-env/
-venv/
-ENV/
-
-# Python Cache & Bytecode
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.egg-info/
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Distribution
 dist/
 build/
-*.spec
+*.egg-info/
 
-# Testing & Coverage
-.pytest_cache/
-htmlcov/
-.coverage
-.coverage.*
-
-# IDE & Editors
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
-# Logs & Temporary Runtime Files
-*.log
-logs/*.log
-interface/tts_cache/
-interface/test_voice.mp3
-interface/latest_screenshot.png
-interface/recordings/*
-!interface/recordings/.gitkeep
-test_screen*.png
-*.debug.png
-ytmusic_*.png
-
-# Operating System Files
-Thumbs.db
-Desktop.ini
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.env.local
+
+# Temporary
+*.tmp
+*.temp
+temp/
+
+# Audio
+*.wav
+*.mp3
+*.ogg
+
+# Video
+*.mp4
+*.webm
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Node (if any)
+node_modules/
+
+# Coverage
+htmlcov/
+.coverage
+
+# JARVIS specific
+tts_cache/
+latest_screenshot.png
+recordings/
+database/
+config/settings.json
