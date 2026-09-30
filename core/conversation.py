@@ -827,69 +827,69 @@ class ConversationManager:
 		finally:
 			self._emit_speech(False)
 
-def _speak_with_barge_in(self, text: str, turn: int) -> bool:
-		"""Speak a short fixed response while watching for interruption."""
-		print(f"[TURN {turn:03d}] SPEAKING")
-		self._remember_spoken(clean_for_speech(text))
-		self._emit_speech(True)
-		if self._is_remote_turn():
-			# Audio is delivered directly to iPhone companion to speak locally.
-			# Zero PC blocking and zero noise on PC speakers.
-			self._emit_speech(False)
-			return False
-		monitor_stop, interrupted, monitor_thread = self._start_barge_in()
-		try:
-			self.speaker.speak(clean_for_speech(text), wait=True)
-		finally:
-			self._emit_speech(False)
-			self._stop_barge_in(monitor_stop, interrupted, monitor_thread)
-		if interrupted.is_set():
-			print(f"[TURN {turn:03d}] RESPONSE CANCELLED")
-			return True
-		return False
-
-
-def _start_barge_in(self):
-	"""Return (stop_event, interrupted_event, thread) for the monitor.
-
-	Barge-in is opt-in via the ``barge_in`` setting (default off): on
-	loudspeakers the microphone hears JARVIS's own voice, which used to
-	trigger false interruptions — JARVIS cut itself off mid-word, then
-	re-listened and answered its own echo. The UI Stop button and the
-	"stop" voice command always work regardless of this setting.
-	"""
-	monitor_stop = Event()
-	interrupted = Event()
-	if not bool(self.settings.get("barge_in")) or self.listener is None:
-		return monitor_stop, interrupted, None
-
-	def monitor() -> None:
-		if self.listener.monitor_speech(monitor_stop):
-			print("[INTERRUPTION] user speech detected")
-			interrupted.set()
+	def _speak_with_barge_in(self, text: str, turn: int) -> bool:
+			"""Speak a short fixed response while watching for interruption."""
+			print(f"[TURN {turn:03d}] SPEAKING")
+			self._remember_spoken(clean_for_speech(text))
+			self._emit_speech(True)
+			if self._is_remote_turn():
+				# Audio is delivered directly to iPhone companion to speak locally.
+				# Zero PC blocking and zero noise on PC speakers.
+				self._emit_speech(False)
+				return False
+			monitor_stop, interrupted, monitor_thread = self._start_barge_in()
 			try:
-				self.speaker.stop_speaking()
-			except SpeakerError as exc:
-				print(f"[TTS] stop failed: {exc}")
-
-	thread = Thread(target=monitor, name="jarvis-barge-in", daemon=True)
-	thread.start()
-	return monitor_stop, interrupted, thread
-
-def _stop_barge_in(self, monitor_stop: Event, interrupted: Event, thread: Thread | None) -> None:
-	monitor_stop.set()
-	if thread is not None:
-		thread.join(timeout=0.5)
+				self.speaker.speak(clean_for_speech(text), wait=True)
+			finally:
+				self._emit_speech(False)
+				self._stop_barge_in(monitor_stop, interrupted, monitor_thread)
+			if interrupted.is_set():
+				print(f"[TURN {turn:03d}] RESPONSE CANCELLED")
+				return True
+			return False
 
 
-def _absorb_interrupt(self) -> None:
-	"""After an interruption, immediately re-arm listening so the user's
-	in-progress utterance is captured from its start rather than skipped."""
-	self.set_state("interrupted")
-	if self.auto_listen and self.listener is not None:
-		# Ensure we're not paused, then re-arm
-		self._pause.clear()
-		self._arm_listening()
+	def _start_barge_in(self):
+		"""Return (stop_event, interrupted_event, thread) for the monitor.
+
+		Barge-in is opt-in via the ``barge_in`` setting (default off): on
+		loudspeakers the microphone hears JARVIS's own voice, which used to
+		trigger false interruptions — JARVIS cut itself off mid-word, then
+		re-listened and answered its own echo. The UI Stop button and the
+		"stop" voice command always work regardless of this setting.
+		"""
+		monitor_stop = Event()
+		interrupted = Event()
+		if not bool(self.settings.get("barge_in")) or self.listener is None:
+			return monitor_stop, interrupted, None
+
+		def monitor() -> None:
+			if self.listener.monitor_speech(monitor_stop):
+				print("[INTERRUPTION] user speech detected")
+				interrupted.set()
+				try:
+					self.speaker.stop_speaking()
+				except SpeakerError as exc:
+					print(f"[TTS] stop failed: {exc}")
+
+		thread = Thread(target=monitor, name="jarvis-barge-in", daemon=True)
+		thread.start()
+		return monitor_stop, interrupted, thread
+
+	def _stop_barge_in(self, monitor_stop: Event, interrupted: Event, thread: Thread | None) -> None:
+		monitor_stop.set()
+		if thread is not None:
+			thread.join(timeout=0.5)
+
+
+	def _absorb_interrupt(self) -> None:
+		"""After an interruption, immediately re-arm listening so the user's
+		in-progress utterance is captured from its start rather than skipped."""
+		self.set_state("interrupted")
+		if self.auto_listen and self.listener is not None:
+			# Ensure we're not paused, then re-arm
+			self._pause.clear()
+			self._arm_listening()
 
 	def _ready_stream(self) -> None:
 		"""Open a fresh assistant message box on the UI for streaming output."""
@@ -1388,18 +1388,6 @@ def _absorb_interrupt(self) -> None:
 				name = "Aayush"
 			return f"You're {name}."
 		return None
-
-	def _voice_response(self, text: str, intent_type: str, user_input: str) -> str:
-		"""Truncate a response to one sentence for voice output."""
-		# Simple sentence splitting - first sentence only
-		import re
-		sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-		if not sentences:
-			return ""
-		first = sentences[0].strip()
-		if not first.endswith((".", "!", "?")):
-			first += "."
-		return first
 
 	def _needs_openjarvis(self, text: str) -> bool:
 		"""Return True for knowledge, research, and multi-step reasoning tasks."""
@@ -2670,8 +2658,13 @@ def _absorb_interrupt(self) -> None:
 		asks_explanation = any(marker in lower for marker in ("why", "how", "explain", "tell me about", "in detail"))
 		if sub_intent in {"general_request", "general_question"} and not asks_explanation:
 			chunks = sentence_chunks(response)
-			return chunks[0] if chunks else response.strip()
-		return response
+			first = chunks[0] if chunks else response.strip()
+		else:
+			first = response.strip()
+		# An utterance without terminal punctuation sounds clipped.
+		if first and not first.endswith((".", "!", "?")):
+			first += "."
+		return first
 
 	def _companion_prompt(
 		self,
