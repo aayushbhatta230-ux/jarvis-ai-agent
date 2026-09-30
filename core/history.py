@@ -42,5 +42,10 @@ class HistoryStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+    def clear(self) -> None:
+        """Drop every entry and persist the empty log."""
+        self.items = []
+        self.save()
+
     def snapshot(self) -> list[dict[str, Any]]:
         return list(self.items)
