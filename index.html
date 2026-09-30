@@ -1,597 +1,518 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#050310">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="JARVIS">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="description" content="JARVIS — Personal AI Command Gateway. Permanent secure relay to your PC companion.">
-  <title>JARVIS &mdash; Gateway</title>
-  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/interface/icon.png">
-  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/interface/icon.png">
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JARVIS">
+<title>JARVIS — Your AI Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+	--bg: #0d1117;
+	--bg-elevated: #161b22;
+	--fg: #e6edf3;
+	--fg-muted: #8b949e;
+	--accent: #58a6ff;
+	--accent-glow: rgba(88, 166, 255, 0.4);
+	--success: #3fb950;
+	--warning: #d29922;
+	--danger: #f85149;
+	--border: #30363d;
+	--card: #161b22;
+	--input-bg: #0d1117;
+}
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
 
-    :root {
-      --bg-deep: #050310;
-      --bg-surface: rgba(12, 10, 28, 0.65);
-      --cyan: #00e5ff;
-      --violet: #a78bfa;
-      --text: #f0edff;
-      --muted: #9b95b8;
-      --success: #4ade80;
-      --danger: #ff6b7d;
-      --glow-cyan: rgba(0, 229, 255, 0.35);
-      --glow-violet: rgba(167, 139, 250, 0.2);
-    }
+body {
+	font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+	background: var(--bg);
+	color: var(--fg);
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
 
-    html, body {
-      height: 100%;
-      overflow: hidden;
-    }
+#app {
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+	height: 100dvh; /* Dynamic viewport for mobile browsers */
+}
 
-    body {
-      background: var(--bg-deep);
-      color: var(--text);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: max(24px, env(safe-area-inset-top, 24px)) 24px max(24px, env(safe-area-inset-bottom, 24px));
-      text-align: center;
-      -webkit-font-smoothing: antialiased;
-      position: relative;
-    }
+/* --- Header --- */
+header {
+	flex: 0 0 auto;
+	padding: env(safe-area-inset-top, 16px) 20px 12px;
+	text-align: center;
+	border-bottom: 1px solid var(--border);
+	background: linear-gradient(180deg, rgba(22,27,34,0.95), transparent);
+	backdrop-filter: blur(8px);
+	position: sticky;
+	top: 0;
+	z-index: 10;
+}
 
-    /* Ambient Background */
-    .ambient {
-      position: fixed; inset: 0; pointer-events: none; z-index: 0;
-      background:
-        radial-gradient(ellipse 80% 50% at 50% 35%, rgba(88, 62, 190, 0.22) 0%, transparent 100%),
-        radial-gradient(ellipse 60% 40% at 75% 80%, rgba(0, 229, 255, 0.08) 0%, transparent 100%),
-        radial-gradient(ellipse 50% 60% at 20% 70%, rgba(88, 62, 190, 0.1) 0%, transparent 100%);
-    }
+.logo {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	font-family: 'JetBrains Mono', monospace;
+	font-weight: 600;
+	font-size: clamp(18px, 4vw, 22px);
+	letter-spacing: -0.02em;
+}
 
-    .grid-overlay {
-      position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.3;
-      background-image:
-        linear-gradient(rgba(139, 179, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(139, 179, 255, 0.03) 1px, transparent 1px);
-      background-size: 44px 44px;
-      mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 0%, transparent 80%);
-      -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 0%, transparent 80%);
-    }
+.logo svg { width: 28px; height: 28px; color: var(--accent); }
 
-    /* Main Container */
-    .gateway {
-      position: relative; z-index: 1;
-      width: 100%; max-width: 400px;
-      display: flex; flex-direction: column; align-items: center;
-      gap: 0;
-    }
+.status-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 6px;
+	padding: 4px 12px;
+	border-radius: 999px;
+	font-size: 12px;
+	font-weight: 500;
+	font-family: 'JetBrains Mono', monospace;
+	background: var(--card);
+	border: 1px solid var(--border);
+	color: var(--fg-muted);
+}
 
-    /* Arc Reactor Core */
-    .reactor {
-      position: relative;
-      width: 140px; height: 140px;
-      margin-bottom: 32px;
-      display: flex; align-items: center; justify-content: center;
-    }
+.status-badge .dot {
+	width: 8px; height: 8px; border-radius: 50%;
+	background: var(--fg-muted);
+	transition: background 0.3s, box-shadow 0.3s;
+}
 
-    .reactor-ring {
-      position: absolute; inset: 0;
-      border: 1.5px solid transparent;
-      border-radius: 50%;
-    }
+.status-badge.connected .dot { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.status-badge.connecting .dot { background: var(--warning); box-shadow: 0 0 8px var(--warning); animation: pulse 1.5s infinite; }
+.status-badge.error .dot { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
 
-    .reactor-ring-1 {
-      border-color: rgba(0, 229, 255, 0.2);
-      animation: spin-cw 18s linear infinite;
-    }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-    .reactor-ring-2 {
-      inset: 12px;
-      border-top-color: var(--cyan);
-      border-right-color: rgba(0, 229, 255, 0.5);
-      box-shadow: 0 0 20px var(--glow-cyan);
-      animation: spin-ccw 3s cubic-bezier(0.5, 0, 0.5, 1) infinite;
-    }
+/* --- Main Content --- */
+main {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	padding: 20px;
+	gap: 16px;
+}
 
-    .reactor-ring-3 {
-      inset: 24px;
-      border-bottom-color: var(--violet);
-      border-left-color: rgba(167, 139, 250, 0.4);
-      animation: spin-cw 2.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
-    }
+/* Tunnel Card */
+.tunnel-card {
+	flex: 0 0 auto;
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	padding: 20px;
+	box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+}
 
-    .reactor-core {
-      width: 28px; height: 28px;
-      background: radial-gradient(circle, #fff 0%, var(--cyan) 60%, transparent 100%);
-      border-radius: 50%;
-      box-shadow: 0 0 24px var(--cyan), 0 0 48px var(--glow-cyan);
-      animation: core-breathe 2.4s ease-in-out infinite alternate;
-    }
+.tunnel-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 16px;
+}
 
-    .reactor-pulse {
-      position: absolute;
-      width: 60px; height: 60px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(0, 229, 255, 0.15) 0%, transparent 70%);
-      animation: pulse-expand 2.8s ease-in-out infinite;
-    }
+.tunnel-title {
+	font-weight: 600;
+	font-size: 16px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
 
-    @keyframes spin-cw { to { transform: rotate(360deg); } }
-    @keyframes spin-ccw { to { transform: rotate(-360deg); } }
-    @keyframes core-breathe {
-      from { transform: scale(0.88); opacity: 0.75; box-shadow: 0 0 18px var(--cyan), 0 0 36px var(--glow-cyan); }
-      to { transform: scale(1.12); opacity: 1; box-shadow: 0 0 28px var(--cyan), 0 0 56px var(--glow-cyan); }
-    }
-    @keyframes pulse-expand {
-      0%, 100% { transform: scale(0.8); opacity: 0.6; }
-      50% { transform: scale(1.8); opacity: 0; }
-    }
+.tunnel-title::before {
+	content: '';
+	width: 10px; height: 10px;
+	border-radius: 2px;
+	background: var(--accent);
+}
 
-    /* Brand */
-    .brand-tag {
-      font-size: 0.62rem; font-weight: 700;
-      letter-spacing: 0.28em; text-transform: uppercase;
-      color: var(--cyan);
-      background: rgba(0, 229, 255, 0.08);
-      border: 1px solid rgba(0, 229, 255, 0.2);
-      padding: 5px 16px; border-radius: 999px;
-      margin-bottom: 14px;
-      backdrop-filter: blur(8px);
-    }
+.url-display {
+	flex: 1;
+	margin-top: 12px;
+	font-family: 'JetBrains Mono', monospace;
+	font-size: 13px;
+	background: var(--input-bg);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 12px 14px;
+	color: var(--fg-muted);
+	word-break: break-all;
+	user-select: all;
+	-webkit-user-select: all;
+}
 
-    h1 {
-      font-size: 1.8rem; font-weight: 900;
-      letter-spacing: 0.06em;
-      color: #fff;
-      margin-bottom: 6px;
-      text-shadow: 0 0 30px var(--glow-cyan);
-      line-height: 1.1;
-    }
+.url-display.has-url { color: var(--fg); }
 
-    .subtitle {
-      font-size: 0.88rem; font-weight: 500;
-      color: var(--muted);
-      margin-bottom: 28px;
-      line-height: 1.4;
-    }
+/* Action Buttons */
+.btn-group {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 12px;
+	margin-top: 16px;
+}
 
-    /* Status Card */
-    .status-card {
-      width: 100%;
-      background: var(--bg-surface);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      border-radius: 16px;
-      padding: 16px 20px;
-      margin-bottom: 20px;
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      display: flex; align-items: center; gap: 12px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    }
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 14px 20px;
+	border-radius: 12px;
+	font-family: 'Space Grotesk', sans-serif;
+	font-weight: 600;
+	font-size: 15px;
+	border: none;
+	cursor: pointer;
+	transition: transform 0.1s, box-shadow 0.2s, background 0.2s;
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
+}
 
-    .status-indicator {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: var(--muted);
-      flex-shrink: 0;
-      transition: all 0.4s ease;
-    }
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-    .status-indicator.online {
-      background: var(--success);
-      box-shadow: 0 0 10px var(--success), 0 0 20px rgba(74, 222, 128, 0.3);
-      animation: dot-pulse 1.6s ease-in-out infinite;
-    }
+.btn-primary {
+	background: linear-gradient(135deg, var(--accent), #388bfd);
+	color: #0d1117;
+	box-shadow: 0 4px 16px var(--accent-glow);
+}
 
-    .status-indicator.connecting {
-      background: #facc15;
-      box-shadow: 0 0 10px #facc15;
-      animation: dot-pulse 0.8s ease-in-out infinite;
-    }
+.btn-primary:hover { box-shadow: 0 6px 24px var(--accent-glow); }
 
-    .status-indicator.offline {
-      background: var(--danger);
-      box-shadow: 0 0 8px var(--danger);
-    }
+.btn-secondary {
+	background: var(--bg-elevated);
+	color: var(--fg);
+	border: 1px solid var(--border);
+}
 
-    @keyframes dot-pulse {
-      0%, 100% { opacity: 0.6; transform: scale(0.9); }
-      50% { opacity: 1; transform: scale(1.15); }
-    }
+.btn-secondary:hover { border-color: var(--accent); }
 
-    .status-text {
-      flex: 1;
-      text-align: left;
-    }
+.btn-danger {
+	background: var(--danger);
+	color: white;
+}
 
-    .status-label {
-      font-size: 0.78rem; font-weight: 700;
-      color: var(--text);
-      line-height: 1.3;
-    }
+.btn svg { width: 18px; height: 18px; }
 
-    .status-detail {
-      font-size: 0.68rem; font-weight: 500;
-      color: var(--muted);
-      margin-top: 2px;
-    }
+/* QR Code Section */
+.qr-section {
+	margin-top: 20px;
+	padding-top: 20px;
+	border-top: 1px solid var(--border);
+	text-align: center;
+}
 
-    /* Connect Button */
-    .btn-launch {
-      display: flex; align-items: center; justify-content: center;
-      gap: 10px;
-      width: 100%;
-      background: linear-gradient(135deg, #6d28d9, #2563eb, #0891b2);
-      background-size: 200% 200%;
-      animation: gradient-shift 4s ease infinite;
-      color: #fff;
-      font-weight: 800; font-size: 1rem;
-      letter-spacing: 0.03em;
-      padding: 16px 28px;
-      border-radius: 14px;
-      text-decoration: none;
-      border: none; cursor: pointer;
-      box-shadow: 0 8px 28px rgba(99, 102, 241, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
-      transition: all 0.2s ease;
-      position: relative;
-      overflow: hidden;
-    }
+.qr-label { font-size: 13px; color: var(--fg-muted); margin-bottom: 12px; }
 
-    .btn-launch::before {
-      content: '';
-      position: absolute; inset: 0;
-      background: linear-gradient(135deg, transparent 40%, rgba(255, 255, 255, 0.12) 50%, transparent 60%);
-      background-size: 300% 300%;
-      animation: shimmer 3s linear infinite;
-    }
+#qrcode {
+	display: inline-block;
+	padding: 12px;
+	background: white;
+	border-radius: 12px;
+	box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+}
 
-    .btn-launch:active {
-      transform: scale(0.97);
-      box-shadow: 0 4px 16px rgba(99, 102, 241, 0.5);
-    }
+#qrcode img { display: block; width: 200px; height: 200px; }
 
-    @keyframes gradient-shift {
-      0%, 100% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-    }
+/* Connection Status Toast */
+.toast-container {
+	position: fixed;
+	bottom: env(safe-area-inset-bottom, 20px);
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 1000;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: center;
+	pointer-events: none;
+}
 
-    @keyframes shimmer {
-      0% { background-position: 200% 50%; }
-      100% { background-position: -100% 50%; }
-    }
+.toast {
+	padding: 12px 20px;
+	border-radius: 10px;
+	font-size: 14px;
+	font-weight: 500;
+	background: var(--card);
+	border: 1px solid var(--border);
+	box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+	animation: slideUp 0.3s ease-out;
+	pointer-events: auto;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	max-width: 90vw;
+}
 
-    .btn-launch .btn-icon {
-      font-size: 1.15em;
-    }
+.toast.success { border-color: var(--success); }
+.toast.error { border-color: var(--danger); }
+.toast.warning { border-color: var(--warning); }
 
-    /* Retry Button */
-    .btn-retry {
-      display: none;
-      margin-top: 12px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      color: var(--muted);
-      font-size: 0.82rem; font-weight: 600;
-      padding: 10px 22px;
-      border-radius: 10px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
+@keyframes slideUp {
+	from { opacity: 0; transform: translateY(20px); }
+	to { opacity: 1; transform: translateY(0); }
+}
 
-    .btn-retry:active {
-      background: rgba(255, 255, 255, 0.12);
-      color: var(--text);
-    }
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		transition-duration: 0.01ms !important;
+	}
+}
 
-    /* Info Footer */
-    .footer-info {
-      margin-top: 32px;
-      padding-top: 20px;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      width: 100%;
-    }
-
-    .footer-tip {
-      font-size: 0.72rem; font-weight: 500;
-      color: rgba(155, 149, 184, 0.7);
-      line-height: 1.6;
-    }
-
-    .footer-tip strong {
-      color: var(--muted);
-      font-weight: 700;
-    }
-
-    .footer-version {
-      font-size: 0.6rem; font-weight: 600;
-      color: rgba(155, 149, 184, 0.35);
-      margin-top: 12px;
-      letter-spacing: 0.1em;
-    }
-
-    /* Loading spinner on button */
-    .spinner {
-      width: 16px; height: 16px;
-      border: 2px solid rgba(255,255,255,0.3);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: spin-cw 0.6s linear infinite;
-      display: none;
-    }
-
-    .btn-launch.loading .spinner { display: block; }
-    .btn-launch.loading .btn-text { opacity: 0.7; }
-  </style>
+/* Landscape orientation adjustments */
+@media (orientation: landscape) and (max-height: 500px) {
+	main { padding: 12px; gap: 12px; }
+	.tunnel-card { padding: 16px; }
+	.btn { padding: 12px 16px; }
+	#qrcode img { width: 160px; height: 160px; }
+}
+</style>
 </head>
 <body>
-  <div class="ambient"></div>
-  <div class="grid-overlay"></div>
+<div id="app">
+<header>
+	<div class="logo">
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+			<polygon points="5 3 19 12 5 21 5 3"></polygon>
+		</svg>
+		JARVIS
+	</div>
+	<div id="statusBadge" class="status-badge">
+		<span class="dot"></span>
+		<span id="statusText">Checking tunnel…</span>
+	</div>
+</header>
 
-  <div class="gateway">
-    <div class="reactor">
-      <div class="reactor-ring reactor-ring-1"></div>
-      <div class="reactor-ring reactor-ring-2"></div>
-      <div class="reactor-ring reactor-ring-3"></div>
-      <div class="reactor-pulse"></div>
-      <div class="reactor-core"></div>
-    </div>
+<main>
+	<section class="tunnel-card" aria-label="Tunnel connection">
+		<div class="tunnel-header">
+			<h2 class="tunnel-title">Tunnel Connection</h2>
+		</div>
+		<div id="urlDisplay" class="url-display" aria-live="polite">Waiting for tunnel…</div>
+		<div class="btn-group">
+			<button id="refreshBtn" class="btn btn-secondary" aria-label="Refresh tunnel status">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+				Refresh
+			</button>
+			<button id="openBtn" class="btn btn-primary" disabled aria-label="Open JARVIS interface">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></path><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+				Open JARVIS
+			</button>
+		</div>
+		<div class="qr-section">
+			<p class="qr-label">Scan to open on this device</p>
+			<div id="qrcode" aria-hidden="true"></div>
+		</div>
+	</section>
+</main>
 
-    <div class="brand-tag">Neural Quantum Gateway</div>
-    <h1>JARVIS</h1>
-    <p class="subtitle" id="subtitle">Establishing secure relay to your PC&hellip;</p>
+<div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+</div>
 
-    <div class="status-card" id="statusCard">
-      <div class="status-indicator connecting" id="statusDot"></div>
-      <div class="status-text">
-        <div class="status-label" id="statusLabel">Resolving endpoint&hellip;</div>
-        <div class="status-detail" id="statusDetail">Checking tunnel health</div>
-      </div>
-    </div>
+<script>
+(function() {
+	'use strict';
 
-    <a class="btn-launch loading" id="launchBtn" href="#">
-      <div class="spinner"></div>
-      <span class="btn-icon">&#9889;</span>
-      <span class="btn-text">Launch JARVIS Core</span>
-    </a>
+	// --- Config ---
+	const API_BASE = window.location.origin;
+	const POLL_INTERVAL = 3000; // 3s
+	const MAX_RETRIES = 10;
 
-    <div class="quick-options" style="margin-top: 14px; width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 8px;">
-      <button class="btn-secondary-opt" id="btnLanConnect" type="button" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #c4b5fd; padding: 10px 16px; border-radius: 12px; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
-        <span>📶</span> Connect via Local Wi-Fi
-      </button>
-      <button class="btn-secondary-opt" id="btnToggleCustom" type="button" style="background: transparent; border: none; color: #80deea; font-size: 0.78rem; text-decoration: underline; cursor: pointer; padding: 4px;">
-        ⚙️ Enter / Paste custom URL
-      </button>
-      <div id="customUrlBox" style="display: none; flex-direction: column; gap: 6px; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 10px; border: 1px solid rgba(0,229,255,0.2);">
-        <input type="text" id="customUrlInput" placeholder="https://....trycloudflare.com" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(0,229,255,0.3); border-radius: 8px; color: #fff; padding: 8px; font-size: 0.82rem; width: 100%; box-sizing: border-box;">
-        <button type="button" id="btnSaveCustom" style="background: #00e5ff; color: #050310; border: none; border-radius: 8px; font-weight: bold; padding: 7px; cursor: pointer; font-size: 0.82rem;">Save & Connect</button>
-      </div>
-    </div>
+	// --- Elements ---
+	const statusBadge = document.getElementById('statusBadge');
+	const statusText = document.getElementById('statusText');
+	const urlDisplay = document.getElementById('urlDisplay');
+	const refreshBtn = document.getElementById('refreshBtn');
+	const openBtn = document.getElementById('openBtn');
+	const qrcodeEl = document.getElementById('qrcode');
+	const toastContainer = document.getElementById('toastContainer');
 
-    <button class="btn-retry" id="retryBtn" type="button">&#8635; Retry Connection</button>
+	// --- State ---
+	let pollTimer = null;
+	let retryCount = 0;
+	let currentTunnelUrl = null;
+	let isOnline = navigator.onLine;
 
-    <div class="footer-info">
-      <p class="footer-tip">
-        <strong>🔒 Free Permanent Safari Bookmark:</strong><br>
-        Tap <strong>Share &rarr; Add to Home Screen</strong> in Safari.<br>
-        No domain purchase required &mdash; connects via free secure relay.
-      </p>
-      <p class="footer-version">JARVIS GATEWAY v3.0 &bull; Secure Relay</p>
-    </div>
-  </div>
+	// --- Toast System ---
+	function showToast(message, type = 'info', duration = 4000) {
+		const toast = document.createElement('div');
+		toast.className = `toast ${type}`;
+		toast.textContent = message;
+		toastContainer.appendChild(toast);
 
-  <script>
-    const subtitle = document.getElementById('subtitle');
-    const statusDot = document.getElementById('statusDot');
-    const statusLabel = document.getElementById('statusLabel');
-    const statusDetail = document.getElementById('statusDetail');
-    const launchBtn = document.getElementById('launchBtn');
-    const retryBtn = document.getElementById('retryBtn');
-    const btnLanConnect = document.getElementById('btnLanConnect');
-    const btnToggleCustom = document.getElementById('btnToggleCustom');
-    const customUrlBox = document.getElementById('customUrlBox');
-    const customUrlInput = document.getElementById('customUrlInput');
-    const btnSaveCustom = document.getElementById('btnSaveCustom');
+		setTimeout(() => {
+			toast.style.animation = 'slideUp 0.3s ease-out reverse';
+			setTimeout(() => toast.remove(), 300);
+		}, duration);
+	}
 
-    let activeUrl = null;
-    let resolveAttempts = 0;
-    const MAX_ATTEMPTS = 8;
+	// --- QR Code Generation (no external deps) ---
+	function renderQRCode(url) {
+		qrcodeEl.innerHTML = '';
+		// Use Google Chart API for simplicity (works offline if cached)
+		// For production, consider a local QR library like qrcodejs
+		const size = 200;
+		const img = document.createElement('img');
+		img.src = `https://chart.googleapis.com/chart?chs=${size}x${size}&cht=qr&chl=${encodeURIComponent(url)}&choe=UTF-8`;
+		img.alt = 'QR code for ' + url;
+		img.width = size;
+		img.height = size;
+		img.loading = 'lazy';
+		img.onerror = () => {
+			// Fallback: show URL text
+			qrcodeEl.textContent = url;
+			qrcodeEl.style.fontFamily = 'monospace';
+			qrcodeEl.style.fontSize = '12px';
+			qrcodeEl.style.wordBreak = 'break-all';
+		};
+		qrcodeEl.appendChild(img);
+	}
 
-    function setStatus(state, label, detail) {
-      statusDot.className = 'status-indicator ' + state;
-      statusLabel.textContent = label;
-      statusDetail.textContent = detail || '';
-    }
+	// --- Update UI for tunnel state ---
+	function setTunnelState(state, url = null) {
+		statusBadge.className = 'status-badge ' + state;
+		switch (state) {
+			case 'connected':
+				statusText.textContent = 'Connected';
+				urlDisplay.classList.add('has-url');
+				urlDisplay.textContent = url;
+				openBtn.disabled = false;
+				renderQRCode(url);
+				currentTunnelUrl = url;
+				retryCount = 0;
+				break;
+			case 'connecting':
+				statusText.textContent = 'Connecting…';
+				urlDisplay.classList.remove('has-url');
+				urlDisplay.textContent = 'Establishing tunnel…';
+				openBtn.disabled = true;
+				qrcodeEl.innerHTML = '';
+				break;
+			case 'error':
+				statusText.textContent = 'Connection failed';
+				urlDisplay.classList.remove('has-url');
+				urlDisplay.textContent = 'Unable to establish tunnel. Check server.';
+				openBtn.disabled = true;
+				qrcodeEl.innerHTML = '';
+				break;
+			default:
+				statusText.textContent = 'Checking tunnel…';
+				urlDisplay.classList.remove('has-url');
+				urlDisplay.textContent = 'Waiting for tunnel…';
+				openBtn.disabled = true;
+				qrcodeEl.innerHTML = '';
+		}
+	}
 
-    function executeRedirect(url) {
-      if (!url) return;
-      subtitle.textContent = 'Opening JARVIS Interface\u2026';
-      launchBtn.classList.add('loading');
-      try {
-        window.location.replace(url);
-      } catch (_) {
-        window.location.href = url;
-      }
-    }
+	// --- Poll tunnel status ---
+	async function pollTunnel() {
+		if (!isOnline) {
+			setTunnelState('error');
+			return;
+		}
+		try {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 5000);
+			const res = await fetch(`${API_BASE}/api/tunnel`, {
+				signal: controller.signal,
+				headers: { 'Accept': 'application/json' }
+			});
+			clearTimeout(timeout);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			if (data.url) {
+				setTunnelState('connected', data.url);
+			} else {
+				setTunnelState('connecting');
+			}
+		} catch (err) {
+			console.warn('[TUNNEL] Poll failed:', err);
+			retryCount++;
+			if (retryCount >= MAX_RETRIES) {
+				setTunnelState('error');
+				showToast('Tunnel unavailable. Is the server running?', 'error', 6000);
+				stopPolling();
+			} else {
+				setTunnelState('connecting');
+			}
+		}
+	}
 
-    function fetchWithTimeout(url, opts = {}, ms = 3200) {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), ms);
-      return fetch(url, { ...opts, signal: controller.signal })
-        .finally(() => clearTimeout(id));
-    }
+	function startPolling() {
+		if (pollTimer) return;
+		pollTunnel(); // immediate
+		pollTimer = setInterval(pollTunnel, POLL_INTERVAL);
+	}
 
-    async function checkEndpointHealth(url) {
-      try {
-        const resp = await fetchWithTimeout(url + '/api/ping', {
-          cache: 'no-store',
-          headers: { 'ngrok-skip-browser-warning': 'true' }
-        }, 2800);
-        return resp.ok;
-      } catch (_) {
-        return false;
-      }
-    }
+	function stopPolling() {
+		if (pollTimer) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
+	}
 
-    async function resolveLiveEndpoint() {
-      resolveAttempts++;
-      const ts = Date.now();
+	// --- Event Listeners ---
+	refreshBtn.addEventListener('click', () => {
+		retryCount = 0;
+		setTunnelState('connecting');
+		pollTunnel();
+	});
 
-      const sources = [
-        './endpoint.json?t=' + ts,
-        '../endpoint.json?t=' + ts,
-        'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/gh-pages/docs/endpoint.json?t=' + ts,
-        'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/gh-pages/endpoint.json?t=' + ts,
-        'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/docs/endpoint.json?t=' + ts,
-        'https://raw.githubusercontent.com/aayushbhatta230-ux/jarvis-ai-agent/main/endpoint.json?t=' + ts
-      ];
+	openBtn.addEventListener('click', () => {
+		if (currentTunnelUrl) {
+			window.open(currentTunnelUrl, '_blank');
+			showToast('Opening JARVIS…', 'success');
+		}
+	});
 
-      setStatus('connecting', 'Resolving relay\u2026', 'Checking free secure tunnel');
+	urlDisplay.addEventListener('click', () => {
+		if (currentTunnelUrl) {
+			navigator.clipboard?.writeText(currentTunnelUrl).then(() => {
+				showToast('URL copied to clipboard', 'success');
+			}).catch(() => {
+				// fallback: select text
+				urlDisplay.select();
+				showToast('URL selected — copy manually', 'info');
+			});
+		}
+	});
 
-      // Check saved custom URL first
-      const savedCustom = localStorage.getItem('jarvis_custom_url');
-      if (savedCustom && (savedCustom.startsWith('https://') || savedCustom.startsWith('http://'))) {
-        const ok = await checkEndpointHealth(savedCustom);
-        if (ok) {
-          activeUrl = savedCustom;
-          launchBtn.href = activeUrl;
-          launchBtn.classList.remove('loading');
-          setStatus('online', 'Custom Relay Connected', activeUrl.replace(/^https?:\/\//, ''));
-          subtitle.textContent = 'Connecting to your saved URL';
-          setTimeout(() => executeRedirect(activeUrl), 400);
-          return;
-        }
-      }
+	// Online/offline detection
+	window.addEventListener('online', () => {
+		isOnline = true;
+		showToast('Back online', 'success');
+		startPolling();
+	});
+	window.addEventListener('offline', () => {
+		isOnline = false;
+		showToast('You are offline', 'warning', 6000);
+	});
 
-      for (const src of sources) {
-        try {
-          const resp = await fetchWithTimeout(src, { cache: 'no-store' }, 3000);
-          if (!resp.ok) continue;
-          const data = await resp.json();
+	// Visibility change: pause polling when hidden
+	document.addEventListener('visibilitychange', () => {
+		if (document.hidden) stopPolling();
+		else startPolling();
+	});
 
-          const candidates = [
-            data.tunnel_url,
-            data.permanent_url,
-            localStorage.getItem('jarvis_last_good_url')
-          ].filter(u => u && typeof u === 'string' && u.startsWith('https://') && !u.includes('aayushifty.com'));
-
-          for (const cand of candidates) {
-            setStatus('connecting', 'Verifying tunnel\u2026', cand.replace('https://', ''));
-            const isHealthy = await checkEndpointHealth(cand);
-            if (isHealthy) {
-              activeUrl = cand;
-              try { localStorage.setItem('jarvis_last_good_url', cand); } catch (_) {}
-              launchBtn.href = activeUrl;
-              launchBtn.classList.remove('loading');
-              setStatus('online', 'JARVIS Online', 'Secure relay active');
-              subtitle.textContent = 'PC companion connected \u2014 opening';
-              retryBtn.style.display = 'none';
-              setTimeout(() => executeRedirect(activeUrl), 500);
-              return;
-            }
-          }
-
-          if (data && data.tunnel_url && data.tunnel_url.startsWith('https://') && !data.tunnel_url.includes('aayushifty.com')) {
-            activeUrl = data.tunnel_url;
-            launchBtn.href = activeUrl;
-            launchBtn.classList.remove('loading');
-            setStatus('online', 'Relay Resolved', 'Tap Launch to connect');
-            subtitle.textContent = 'Relay ready';
-            retryBtn.style.display = 'none';
-            setTimeout(() => executeRedirect(activeUrl), 800);
-            return;
-          }
-        } catch (_) {}
-      }
-
-      if (resolveAttempts >= MAX_ATTEMPTS) {
-        setStatus('offline', 'PC Offline', 'Ensure JARVIS is running on your PC');
-        subtitle.textContent = 'Could not reach tunnel relay';
-        launchBtn.classList.remove('loading');
-        retryBtn.style.display = 'block';
-      } else {
-        setStatus('connecting', 'Searching\u2026', 'Attempt ' + resolveAttempts + ' of ' + MAX_ATTEMPTS);
-        setTimeout(resolveLiveEndpoint, 2500);
-      }
-    }
-
-    launchBtn.addEventListener('click', (e) => {
-      if (activeUrl) {
-        e.preventDefault();
-        executeRedirect(activeUrl);
-      } else {
-        e.preventDefault();
-        resolveAttempts = 0;
-        resolveLiveEndpoint();
-      }
-    });
-
-    retryBtn.addEventListener('click', () => {
-      resolveAttempts = 0;
-      retryBtn.style.display = 'none';
-      resolveLiveEndpoint();
-    });
-
-    if (btnLanConnect) {
-      btnLanConnect.addEventListener('click', async () => {
-        // Probe the PC over the local Wi-Fi/LAN. Works over http:// on the same network
-        // (voice input over plain http:// is blocked by iOS, so the tunnel stays preferred).
-        btnLanConnect.disabled = true;
-        const original = btnLanConnect.innerHTML;
-        btnLanConnect.innerHTML = '<span>\u23F3</span> Scanning local network\u2026';
-        const guesses = [
-          'http://192.168.1.68:8765',
-          'http://192.168.1.1:8765',
-          'http://127.0.0.1:8765',
-          'http://localhost:8765'
-        ];
-        try {
-          for (const url of guesses) {
-            const ok = await checkEndpointHealth(url);
-            if (ok) {
-              try { localStorage.setItem('jarvis_last_good_url', url); } catch (_) {}
-              btnLanConnect.innerHTML = '<span>\u2705</span> Found ' + url;
-              setTimeout(() => executeRedirect(url), 400);
-              return;
-            }
-          }
-          setStatus('offline', 'No LAN relay found', 'Enter your PC IP manually below');
-          subtitle.textContent = 'Use the custom URL option with your PC IP';
-          if (customUrlBox) customUrlBox.style.display = 'flex';
-        } finally {
-          btnLanConnect.disabled = false;
-          setTimeout(() => { btnLanConnect.innerHTML = original; }, 2500);
-        }
-      });
-    }
-
-    if (btnToggleCustom && customUrlBox) {
-      btnToggleCustom.addEventListener('click', () => {
-        customUrlBox.style.display = customUrlBox.style.display === 'none' ? 'flex' : 'none';
-        if (customUrlInput && activeUrl) customUrlInput.value = activeUrl;
-      });
-    }
-
-    if (btnSaveCustom && customUrlInput) {
-      btnSaveCustom.addEventListener('click', () => {
-        const val = customUrlInput.value.trim();
-        if (val) {
-          localStorage.setItem('jarvis_custom_url', val);
-          executeRedirect(val);
-        }
-      });
-    }
-
-    resolveLiveEndpoint();
-  </script>
+	// --- Init ---
+	startPolling();
+})();
+</script>
 </body>
 </html>
