@@ -49,7 +49,7 @@ class ConversationManager:
 	"""Coordinate text + voice turns, stream state/messages to subscribers."""
 
 	VALID_STATES = {"idle", "listening", "understanding", "planning", "processing", "executing",
-	                "speaking", "waiting_confirmation", "interrupted", "error"}
+	                "speaking", "waiting_confirmation", "interrupted", "error", "offline"}
 
 	def __init__(self, brain: Brain, speaker: Speaker, listener: Listener | None = None,
 			 events: EventHub | None = None, settings: Settings | None = None,
