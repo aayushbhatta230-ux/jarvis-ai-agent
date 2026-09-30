@@ -54,6 +54,15 @@ class PreferenceStore:
 		self.path.parent.mkdir(parents=True, exist_ok=True)
 		self.path.write_text(json.dumps(self.data, indent=2) + "\n", encoding="utf-8")
 
+	def get(self, key: str, default: Any = None) -> Any:
+		"""Read a preference bucket without raising on missing data."""
+		return self.data.get(key, default)
+
+	def set(self, key: str, value: Any) -> None:
+		"""Write a preference bucket and persist immediately."""
+		self.data[key] = value
+		self.save()
+
 	def snapshot(self) -> dict[str, Any]:
 		return json.loads(json.dumps(self.data))
 
