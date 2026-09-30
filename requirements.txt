@@ -1,32 +1,35 @@
-# Core audio and speech
-SpeechRecognition>=3.10.0
+# JARVIS Dependencies
+
+## Core
+numpy>=1.24.0
 sounddevice>=0.4.6
-numpy>=1.26.0
-
-# Neural Voice & Speech Synthesis
-edge-tts>=6.1.12
-
-# System and OS Automation
+speechrecognition>=3.10.0
+webrtcvad>=2.0.10
+psutil>=5.9.0
+pillow>=10.0.0
+mss>=9.0.0
 pywin32>=306
-pyautogui>=0.9.54
-pywinctl>=0.3.0
-pygetwindow>=0.0.9
-psutil>=5.9.8
-pyperclip>=1.8.2
+comtypes>=1.2.0
 
-# AI Models & Local Inference
+# LLM
 ollama>=0.3.0
-openjarvis>=1.0.0
 
-# Screen Capture, Vision and Perception
-mss>=9.0.1
-Pillow>=10.2.0
-pytesseract>=0.3.10
+# Web
+# Uses stdlib only (http.server, urllib, json, threading)
 
-# Media Automation & Video ID Discovery
-yt-dlp>=2024.0.0
-requests>=2.31.0
+# Optional - for enhanced features
+# faster-whisper>=0.9.0  # Local STT fallback
+# edge-tts>=6.1.0       # Neural TTS
+# pydub>=0.25.1         # Audio conversion
+# openai>=1.0.0         # OpenAI embeddings
+# chromadb>=0.4.0       # Vector DB
+# faiss-cpu>=1.7.4      # Vector search
 
-# Document Processing (optional)
-python-docx>=1.1.0
-pypdf>=4.0.0
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0
+
+# Linting
+ruff>=0.1.0
