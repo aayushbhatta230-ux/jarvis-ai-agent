@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'portfolio.html'
       - 'portfolio/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -30,7 +30,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: './portfolio'
 
       - name: Deploy to GitHub Pages
         id: deployment
