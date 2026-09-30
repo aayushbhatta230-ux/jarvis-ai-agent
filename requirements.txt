@@ -10,9 +10,21 @@ pillow>=10.0.0
 mss>=9.0.0
 pywin32>=306
 comtypes>=1.2.0
+requests>=2.31.0
 
-# LLM
+## LLM
 ollama>=0.3.0
+
+## Desktop automation
+pyautogui>=0.9.54
+pygetwindow>=0.0.9
+pyperclip>=1.8.2
+pywinctl>=0.3.4
+
+## Documents
+python-docx>=1.1.0
+pypdf>=4.0.0
+send2trash>=1.8.3
 
 # Web
 # Uses stdlib only (http.server, urllib, json, threading)
@@ -24,6 +36,11 @@ ollama>=0.3.0
 # openai>=1.0.0         # OpenAI embeddings
 # chromadb>=0.4.0       # Vector DB
 # faiss-cpu>=1.7.4      # Vector search
+# pytesseract>=0.3.10   # OCR (also needs the Tesseract binary)
+# yt-dlp>=2024.1.0      # Media download
+# PySide6>=6.6.0        # Desktop overlay UI
+# PyOpenGL>=3.1.7       # Desktop overlay rendering
+# opencv-python>=4.9   # Screen recording
 
 # Testing
 pytest>=7.4.0
