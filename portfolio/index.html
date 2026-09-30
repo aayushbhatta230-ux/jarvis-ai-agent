@@ -147,12 +147,69 @@
         
         footer { text-align: center; padding: 2rem; color: var(--fg-muted); border-top: 1px solid var(--border); margin-top: 3rem; }
         
+        /* ---------- Motion layer ---------- */
+        
+        .aurora {
+            position: fixed; inset: 0; z-index: -2; overflow: hidden;
+            background: radial-gradient(ellipse 80% 60% at 50% -10%, rgba(88,166,255,0.18), transparent 60%);
+        }
+        .aurora span {
+            position: absolute; display: block; border-radius: 50%;
+            filter: blur(90px); opacity: 0.35;
+            animation: drift 22s ease-in-out infinite alternate;
+        }
+        .aurora span:nth-child(1) { width: 42vw; height: 42vw; top: -10%; left: -5%;  background: #1f6feb; animation-duration: 24s; }
+        .aurora span:nth-child(2) { width: 38vw; height: 38vw; top: 20%;  right: -8%; background: #58a6ff; animation-duration: 19s; animation-delay: -6s; }
+        .aurora span:nth-child(3) { width: 34vw; height: 34vw; bottom: -12%; left: 25%; background: #7c3aed; opacity: 0.22; animation-duration: 28s; animation-delay: -12s; }
+        
+        @keyframes drift {
+            from { transform: translate3d(0, 0, 0) scale(1); }
+            to   { transform: translate3d(6vw, 8vh, 0) scale(1.18); }
+        }
+        
+        #particles {
+            position: fixed; inset: 0; z-index: -1; pointer-events: none;
+        }
+        
+        .progress {
+            position: fixed; top: 0; left: 0; height: 3px; width: 0;
+            background: linear-gradient(90deg, #388bfd, #58a6ff);
+            box-shadow: 0 0 12px var(--accent-glow);
+            z-index: 10; transition: width 0.1s linear;
+        }
+        
+        /* Scroll reveal */
+        .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s cubic-bezier(.2,.7,.3,1); }
+        .reveal.visible { opacity: 1; transform: none; }
+        .reveal.d1 { transition-delay: 0.08s; }
+        .reveal.d2 { transition-delay: 0.16s; }
+        .reveal.d3 { transition-delay: 0.24s; }
+        
+        .card { position: relative; overflow: hidden; }
+        .card::after {
+            content: ''; position: absolute; inset: 0; pointer-events: none;
+            background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(88,166,255,0.14), transparent 60%);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .card:hover::after { opacity: 1; }
+        
+        .avatar { animation: float 6s ease-in-out infinite; }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-8px); }
+        }
+        
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { animation: none !important; transition: none !important; }
+            .reveal { opacity: 1; transform: none; }
+            .aurora, #particles { display: none; }
         }
     </style>
 </head>
 <body>
+    <div class="progress" id="progress" aria-hidden="true"></div>
+    <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+    <canvas id="particles" aria-hidden="true"></canvas>
     <div class="container">
         <header>
             <div class="avatar" aria-hidden="true">AB</div>
@@ -284,6 +341,120 @@
     </div>
     
     <script>
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        /* ---------- Scroll progress ---------- */
+        const progressBar = document.getElementById('progress');
+        function updateProgress() {
+            const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+            const ratio = scrollable > 0 ? window.scrollY / scrollable : 0;
+            progressBar.style.width = (ratio * 100).toFixed(2) + '%';
+        }
+        window.addEventListener('scroll', updateProgress, { passive: true });
+        updateProgress();
+
+        /* ---------- Scroll reveal ---------- */
+        const revealTargets = document.querySelectorAll(
+            'header > *, section, .stat, footer'
+        );
+        revealTargets.forEach((el, index) => el.classList.add('reveal'));
+        if (reducedMotion || !('IntersectionObserver' in window)) {
+            revealTargets.forEach(el => el.classList.add('visible'));
+        } else {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+            revealTargets.forEach(el => observer.observe(el));
+        }
+
+        /* ---------- Card cursor glow ---------- */
+        if (!reducedMotion && window.matchMedia('(hover: hover)').matches) {
+            document.querySelectorAll('.card').forEach(card => {
+                card.addEventListener('pointermove', (event) => {
+                    const rect = card.getBoundingClientRect();
+                    card.style.setProperty('--mx', (event.clientX - rect.left) + 'px');
+                    card.style.setProperty('--my', (event.clientY - rect.top) + 'px');
+                });
+            });
+        }
+
+        /* ---------- Ambient particle field ---------- */
+        function startParticles() {
+            const canvas = document.getElementById('particles');
+            const ctx = canvas.getContext('2d');
+            let width, height, particles, frame;
+
+            function resize() {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+                // Fewer particles on small screens keeps the frame rate up.
+                const count = Math.min(90, Math.round((width * height) / 16000));
+                particles = Array.from({ length: count }, () => ({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    r: Math.random() * 1.6 + 0.4,
+                    vx: (Math.random() - 0.5) * 0.18,
+                    vy: (Math.random() - 0.5) * 0.18,
+                }));
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, width, height);
+                for (const p of particles) {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    if (p.x < 0) p.x = width;
+                    if (p.x > width) p.x = 0;
+                    if (p.y < 0) p.y = height;
+                    if (p.y > height) p.y = 0;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(88, 166, 255, 0.35)';
+                    ctx.fill();
+                }
+                // Connect nearby particles into a sparse constellation.
+                for (let i = 0; i < particles.length; i++) {
+                    for (let j = i + 1; j < particles.length; j++) {
+                        const dx = particles[i].x - particles[j].x;
+                        const dy = particles[i].y - particles[j].y;
+                        const dist = Math.hypot(dx, dy);
+                        if (dist < 120) {
+                            ctx.beginPath();
+                            ctx.moveTo(particles[i].x, particles[i].y);
+                            ctx.lineTo(particles[j].x, particles[j].y);
+                            ctx.strokeStyle = 'rgba(88, 166, 255, ' + (0.14 * (1 - dist / 120)).toFixed(3) + ')';
+                            ctx.lineWidth = 0.6;
+                            ctx.stroke();
+                        }
+                    }
+                }
+                frame = requestAnimationFrame(draw);
+            }
+
+            resize();
+            draw();
+            window.addEventListener('resize', () => {
+                cancelAnimationFrame(frame);
+                resize();
+                draw();
+            });
+            // Stop burning CPU when the tab is in the background.
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    cancelAnimationFrame(frame);
+                } else {
+                    draw();
+                }
+            });
+        }
+
+        if (!reducedMotion) startParticles();
+
         // Fetch GitHub stats
         async function fetchGitHubStats() {
             try {
