@@ -1,23 +1,95 @@
+# pyproject.toml
+
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "jarvis-companion"
-version = "0.2.0"
-description = "Autonomous local-first computer companion and remote control agent for Windows"
+name = "jarvis-ai-agent"
+version = "3.1.0"
+description = "JARVIS - Local-first AI assistant with voice and web interface"
 readme = "README.md"
-authors = [{ name = "Aayush Bhatta" }]
-license = { text = "MIT" }
-requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "Aayush Bhatta", email = "aayush@example.com"}
+]
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "Operating System :: Microsoft :: Windows",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Desktop Environment",
+]
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "sounddevice>=0.4.6",
+  "speechrecognition>=3.10",
+  "webrtcvad>=2.0.10",
+  "psutil>=5.9",
+  "pillow>=10.0",
+  "mss>=9.0",
+  "pywin32>=306",
+  "comtypes>=1.2",
+  "ollama>=0.3",
 ]
 
+[project.optional-dependencies]
+voice = [
+  "faster-whisper>=0.9",
+  "edge-tts>=6.1",
+  "pydub>=0.25",
+]
+embeddings = [
+  "openai>=1.0",
+  "chromadb>=0.4",
+  "faiss-cpu>=1.7",
+]
+dev = [
+  "pytest>=7.4",
+  "pytest-cov>=4.1",
+  "pytest-asyncio>=0.21",
+  "pytest-mock>=3.11",
+  "ruff>=0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/aayushbhatta230-ux/jarvis-ai-agent"
+Repository = "https://github.com/aayushbhatta230-ux/jarvis-ai-agent"
+Issues = "https://github.com/aayushbhatta230-ux/jarvis-ai-agent/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "voice*", "interface*", "tools*", "vision*", "tests*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "UP", "B", "C4", "SIM", "T20", "PIE"]
+ignore = ["E501", "SIM102", "SIM103", "T201", "T203"]
+per-file-ignores = {
+  "tests/*": ["S101", "S106"],
+  "interface/server.py": ["T201"],
+  "voice/listener.py": ["T201"],
+}
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+indent-width = 4
+
 [tool.pytest.ini_options]
-minversion = "7.0"
-addopts = "-ra -q"
 testpaths = ["tests"]
-pythonpath = ["."]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
