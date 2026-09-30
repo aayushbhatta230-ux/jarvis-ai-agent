@@ -11,6 +11,11 @@ from tools.win_exec import run_no_window
 from typing import Any
 
 
+# PowerShell cold start regularly exceeds a few seconds on a loaded machine,
+# which made clipboard writes fail intermittently under load.
+POWERSHELL_TIMEOUT = 15
+
+
 def get_clipboard_text() -> str | None:
     """Read text content from Windows clipboard."""
     try:
@@ -18,7 +23,7 @@ def get_clipboard_text() -> str | None:
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=POWERSHELL_TIMEOUT,
         )
         if proc.returncode == 0:
             return proc.stdout.strip()
@@ -35,7 +40,7 @@ def set_clipboard_text(text: str) -> bool:
             input=text,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=POWERSHELL_TIMEOUT,
         )
         return proc.returncode == 0
     except Exception as exc:
