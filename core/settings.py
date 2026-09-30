@@ -31,6 +31,19 @@ DEFAULTS: dict[str, Any] = {
 
 VALID_VERBOSITY = ("concise", "normal", "detailed")
 SENSITIVITY_RANGE = (0.4, 2.5)
+FALSEY_STRINGS = ("0", "false", "no", "off", "n", "f", "none", "")
+
+
+def _to_bool(value: Any) -> bool:
+    """Coerce a JSON or string flag to a real bool.
+
+    ``bool("false")`` is ``True`` in Python, so settings arriving from the
+    web UI or a hand-edited config file would silently invert. These strings
+    are treated as False instead.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() not in FALSEY_STRINGS
+    return bool(value)
 
 
 class Settings:
@@ -73,8 +86,9 @@ class Settings:
         if key == "voice":
             return str(value).strip()[:120]
         if key == "mic_sensitivity":
+            low, high = SENSITIVITY_RANGE
             try:
-                return round(float(min(max(float(value), *SENSITIVITY_RANGE), 2.5)), 2)
+                return round(min(max(float(value), low), high), 2)
             except (TypeError, ValueError):
                 return DEFAULTS["mic_sensitivity"]
         if key == "response_verbosity":
@@ -87,16 +101,16 @@ class Settings:
         if key == "theme":
             return value if isinstance(value, str) else DEFAULTS["theme"]
         if key == "auto_listen":
-            return bool(value)
+            return _to_bool(value)
         if key == "barge_in":
-            return bool(value)
+            return _to_bool(value)
         if key == "permission_level":
             val = str(value).upper().strip()
             if val in ("OFF", "OBSERVE_ONLY", "CONTROL_WITH_CONFIRMATION", "FULL_CONTROL"):
                 return val
             return DEFAULTS["permission_level"]
         if key == "pc_speaker_enabled":
-            return bool(value)
+            return _to_bool(value)
         return value
 
     def save(self) -> None:
