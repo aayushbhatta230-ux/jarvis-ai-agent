@@ -119,13 +119,32 @@ class TestNeuralMemory:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "memory.db"
             memory = NeuralMemory(path)
-            
+
             memory.store("User prefers dark mode", category="preference")
             memory.store("Project is called Jarvis", category="project")
-            
-            context = memory.get_rag_context("preferences", max_items=3)
+
+            context = memory.get_rag_context("dark mode Jarvis", max_items=3)
+            assert "RELEVANT NEURAL MEMORIES:" in context
             assert "dark mode" in context
             assert "Jarvis" in context
+            assert "[PREFERENCE]" in context
+            assert "[PROJECT]" in context
+
+    def test_get_rag_context_respects_max_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "memory.db"
+            memory = NeuralMemory(path)
+            for i in range(5):
+                memory.store(f"shared topic memory number {i}", category="fact")
+
+            context = memory.get_rag_context("shared topic memory", max_items=2)
+            assert context.count("\n- [") == 2
+
+    def test_get_rag_context_empty_when_nothing_relevant(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "memory.db"
+            memory = NeuralMemory(path)
+            assert memory.get_rag_context("zzzz qqqq xxxx", max_items=3) == ""
 
     def test_get_stats(self):
         with tempfile.TemporaryDirectory() as tmpdir:
