@@ -312,6 +312,7 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
     # -----------------------------------------------------------------
     if not force_new:
         existing_url = get_tunnel_url() or get_permanent_url()
+        # Reuse Cloudflare quick tunnel if still running
         if existing_url and "trycloudflare.com" in existing_url and _is_cloudflared_running():
             if _check_tunnel_alive(existing_url):
                 with _lock:
@@ -328,6 +329,24 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
                     callback(existing_url)
                 _sync_gateway(existing_url)
                 return None
+        # Reuse ngrok static domain or Cloudflare token tunnel
+        # (they write the permanent URL to the files and don't need process reuse)
+        if existing_url and ("ngrok" in existing_url or "cloudflare" in existing_url) and "trycloudflare.com" not in existing_url:
+            if _check_tunnel_alive(existing_url):
+                with _lock:
+                    _tunnel_url = existing_url
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                TUNNEL_URL_FILE.write_text(existing_url, encoding="utf-8")
+                PERMANENT_URL_FILE.write_text(existing_url, encoding="utf-8")
+                print("=" * 60)
+                print("  JARVIS PERMANENT URL ACTIVE (REUSING CONFIGURED DOMAIN):")
+                print(f"  --> {existing_url}")
+                print("  Domain is locked and unchanged across server runs!")
+                print("=" * 60)
+                if callback:
+                    callback(existing_url)
+                _sync_gateway(existing_url)
+                return None
 
     if force_new:
         _kill_existing_tunnels()
@@ -336,27 +355,131 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
         global _tunnel_url, _tunnel_process
 
         # -------------------------------------------------------------
-        # Mode 1: Cloudflare Tunnel (Token-backed Named Tunnel or Quick Tunnel)
+        # Priority 1: Cloudflare Named Tunnel (token-backed, permanent branded domain)
         # -------------------------------------------------------------
-        if cloudflared:
+        if cloudflared and get_tunnel_token():
             token = get_tunnel_token()
-            use_token = bool(token)
+            print(f"[TUNNEL] Launching Cloudflare Zero Trust Named Tunnel using configured token...")
+            while _running:
+                cmd = [
+                    cloudflared, "tunnel", "--no-autoupdate", "run", "--token", token
+                ]
+                try:
+                    creationflags = (
+                        subprocess.CREATE_NEW_PROCESS_GROUP
+                        if sys.platform == "win32"
+                        else 0
+                    )
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        creationflags=creationflags,
+                    )
+                except Exception as exc:
+                    print(f"[TUNNEL] Failed to start cloudflared: {exc}")
+                    time.sleep(3)
+                    continue
+
+                with _lock:
+                    _tunnel_process = proc
+
+                hostname_pattern = re.compile(r'"hostname"\s*:\s*"([^"]+)"')
+                registered = False
+
+                for line in proc.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    host_match = hostname_pattern.search(line)
+                    if host_match:
+                        domain = host_match.group(1).strip()
+                        url = f"https://{domain}"
+                        registered = True
+                        with _lock:
+                            _tunnel_url = url
+                        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                        TUNNEL_URL_FILE.write_text(url, encoding="utf-8")
+                        PERMANENT_URL_FILE.write_text(url, encoding="utf-8")
+                        print("=" * 60)
+                        print("  JARVIS CLOUDFLARE NAMED TUNNEL ACTIVE (VIA TOKEN):")
+                        print(f"  --> {url}")
+                        print("  Permanent branded domain is live and active!")
+                        print("=" * 60)
+                        if callback:
+                            callback(url)
+                        _sync_gateway(url)
+
+                proc.wait()
+                return
+
+        # -------------------------------------------------------------
+        # Priority 2: ngrok with Static Domain (permanent free domain)
+        # -------------------------------------------------------------
+        if ngrok_bin and ngrok_domain:
+            target_url = f"https://{ngrok_domain}"
+            cmd = [ngrok_bin, "http", str(port), f"--url={ngrok_domain}", "--log=stdout"]
+            print("=" * 60)
+            print("  JARVIS PERMANENT URL (ngrok static domain):")
+            print(f"  --> {target_url}")
+            print("=" * 60)
+
+            with _lock:
+                _tunnel_url = target_url
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            TUNNEL_URL_FILE.write_text(target_url, encoding="utf-8")
+            PERMANENT_URL_FILE.write_text(target_url, encoding="utf-8")
+            if callback:
+                callback(target_url)
 
             while _running:
-                if use_token:
-                    cmd = [
-                        cloudflared, "tunnel", "--no-autoupdate", "run", "--token", token
-                    ]
-                    print(f"[TUNNEL] Launching Cloudflare Zero Trust Named Tunnel using configured token...")
-                else:
-                    cmd = [
-                        cloudflared, "tunnel", "--url", f"http://127.0.0.1:{port}",
-                        "--no-autoupdate",
-                    ]
-                    print(f"[TUNNEL] Launching persistent Cloudflare Tunnel: {' '.join(cmd)}")
-
                 try:
-                    # Windows: CREATE_NEW_PROCESS_GROUP allows cloudflared to persist cleanly
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                    )
+                except Exception as exc:
+                    print(f"[TUNNEL] Failed to launch ngrok: {exc}")
+                    time.sleep(3)
+                    continue
+
+                with _lock:
+                    _tunnel_process = proc
+
+                for line in proc.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if "started tunnel" in line or "client session established" in line:
+                        print(f"[TUNNEL] {line}")
+                    elif "error" in line.lower() or "crit" in line.lower():
+                        print(f"[TUNNEL] {line}")
+
+                proc.wait()
+                with _lock:
+                    _tunnel_process = None
+                if not _running:
+                    break
+                time.sleep(3)
+            return
+
+        # -------------------------------------------------------------
+        # Priority 3: Cloudflare Quick Tunnel (temporary, rotates)
+        # -------------------------------------------------------------
+        if cloudflared:
+            print(f"[TUNNEL] Launching persistent Cloudflare Tunnel (quick tunnel)...")
+            while _running:
+                cmd = [
+                    cloudflared, "tunnel", "--url", f"http://127.0.0.1:{port}",
+                    "--no-autoupdate",
+                ]
+                try:
                     creationflags = (
                         subprocess.CREATE_NEW_PROCESS_GROUP
                         if sys.platform == "win32"
@@ -379,61 +502,14 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
                     _tunnel_process = proc
 
                 url_pattern = re.compile(r"https://[a-zA-Z0-9\-]+\.trycloudflare\.com")
-                hostname_pattern = re.compile(r'"hostname"\s*:\s*"([^"]+)"')
-                started_time = time.time()
                 registered = False
 
                 for line in proc.stdout:
                     line = line.strip()
                     if not line:
                         continue
-
-                    # If in token mode, look for successful registration
-                    if use_token:
-                        host_match = hostname_pattern.search(line)
-                        if host_match:
-                            domain = host_match.group(1).strip()
-                            url = f"https://{domain}"
-                            registered = True
-                            with _lock:
-                                _tunnel_url = url
-                            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-                            TUNNEL_URL_FILE.write_text(url, encoding="utf-8")
-                            PERMANENT_URL_FILE.write_text(url, encoding="utf-8")
-                            print("=" * 60)
-                            print("  JARVIS CLOUDFLARE NAMED TUNNEL ACTIVE (VIA TOKEN):")
-                            print(f"  --> {url}")
-                            print("  Permanent branded domain is live and active!")
-                            print("=" * 60)
-                            if callback:
-                                callback(url)
-                            _sync_gateway(url)
-                        elif "Registered tunnel connection" in line and not registered:
-                            registered = True
-                            url = "https://jarvis.aayushifty.com"
-                            with _lock:
-                                _tunnel_url = url
-                            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-                            TUNNEL_URL_FILE.write_text(url, encoding="utf-8")
-                            PERMANENT_URL_FILE.write_text(url, encoding="utf-8")
-                            print("=" * 60)
-                            print("  JARVIS CLOUDFLARE NAMED TUNNEL CONNECTED:")
-                            print(f"  --> {url}")
-                            print("=" * 60)
-                            if callback:
-                                callback(url)
-                            _sync_gateway(url)
-
-                    if "Unauthorized: Tunnel not found" in line or "Register tunnel error" in line:
-                        print("[TUNNEL] Quick tunnel lease expired on Cloudflare edge (Error 1016 prevented). Auto-recovering...")
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
-                        break
-
                     match = url_pattern.search(line)
-                    if match and not use_token:
+                    if match:
                         url = match.group(0)
                         if "api.trycloudflare.com" in url:
                             continue
@@ -443,48 +519,24 @@ def start_tunnel(port: int = 8765, callback=None, force_new: bool = False) -> th
                         TUNNEL_URL_FILE.write_text(url, encoding="utf-8")
                         PERMANENT_URL_FILE.write_text(url, encoding="utf-8")
                         print("=" * 60)
-                        print("  JARVIS CLOUDFLARE PERMANENT TUNNEL ONLINE:")
+                        print("  JARVIS CLOUDFLARE QUICK TUNNEL ONLINE:")
                         print(f"  --> {url}")
-                        print("  This domain will remain active across restarts!")
+                        print("  Note: this URL rotates; configure ngrok domain or Cloudflare token for a permanent URL.")
                         print("=" * 60)
                         if callback:
                             callback(url)
                         _sync_gateway(url)
 
                 proc.wait()
-                # If token mode crashed quickly, fall back to quick tunnel mode
-                if use_token and (time.time() - started_time < 8) and not registered:
-                    print("[TUNNEL] Token tunnel did not stay connected. Falling back to Quick Tunnel...")
-                    use_token = False
-
-                with _lock:
-                    _tunnel_url = None
-                    _tunnel_process = None
-                if not _running:
-                    break
-                time.sleep(3)
-            return
+                return
 
         # -------------------------------------------------------------
-        # Mode 2: ngrok Fallback (if cloudflared unavailable)
+        # Priority 4: ngrok without static domain (fallback)
         # -------------------------------------------------------------
-        if ngrok_bin and ngrok_domain:
-            target_url = f"https://{ngrok_domain}"
-            cmd = [ngrok_bin, "http", str(port), f"--url={ngrok_domain}", "--log=stdout"]
-            print("=" * 60)
-            print("  JARVIS ACCESS URL (ngrok):")
-            print(f"  --> {target_url}")
-            print("=" * 60)
-
-            with _lock:
-                _tunnel_url = target_url
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            TUNNEL_URL_FILE.write_text(target_url, encoding="utf-8")
-            PERMANENT_URL_FILE.write_text(target_url, encoding="utf-8")
-            if callback:
-                callback(target_url)
-
+        if ngrok_bin:
+            print("[TUNNEL] Launching ngrok (ephemeral URL)...")
             while _running:
+                cmd = [ngrok_bin, "http", str(port), "--log=stdout"]
                 try:
                     proc = subprocess.Popen(
                         cmd,
