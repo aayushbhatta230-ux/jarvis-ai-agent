@@ -92,10 +92,11 @@ class ConversationManager:
 
 		self.auto_listen = bool(self.settings.get("auto_listen")) if allow_listen is None else bool(allow_listen)
 		self._inbox: Queue = Queue()
-		self._pause = Event()          # set while a turn is being handled
-		self._pause.set()
+		self._pause = Event()          # SET = processing a turn, CLEAR = listening allowed
+		self._pause.set()  # Start in paused state
 		self._listening = False
 		self._listen_thread: Thread | None = None
+		self._listen_lock = Lock()  # Prevent multiple concurrent listen threads
 
 		# Agent architecture: confirmation flow and context tracking
 		self._pending_confirmation: dict | None = None
@@ -311,10 +312,7 @@ class ConversationManager:
 			self.completed_request_ids.add(request_id)
 			if request_id == self.active_request_id:
 				self.active_request_id = None
-		if self.state in ("speaking", "processing", "understanding", "executing", "planning"):
-			self.set_state("listening" if self.auto_listen else "idle")
-		if self.auto_listen and not self._is_remote_turn():
-			self._arm_listening()
+		# State will be set by the specific handler; don't auto-transition here
 
 	# ------------------------------------------------------------------ #
 	# Worker loop + listening management
@@ -356,8 +354,8 @@ class ConversationManager:
 
 	def _handle_text(self, text: str, source: str = "text") -> None:
 		"""Route an explicitly typed or remote command through the turn pipeline."""
-		if not self._pause.is_set():
-			self._pause.set()
+		# Set pause to block auto-listening during processing
+		self._pause.set()
 		try:
 			self._route_utterance(text, confidence=1.0, source=source)
 		except BrainError as exc:
@@ -385,8 +383,8 @@ class ConversationManager:
 				self._arm_listening()
 			return
 
-		if not self._pause.is_set():
-			self._pause.set()
+		# Set pause to block further listening during processing
+		self._pause.set()
 		try:
 			self._route_utterance(result.text, confidence=result.confidence, source="voice")
 		except BrainError as exc:
@@ -402,8 +400,8 @@ class ConversationManager:
 			print(f"Turn error: {exc}")
 			self._emit_notice("Something went wrong. Please try again.")
 		finally:
+			self._pause.clear()
 			if self.auto_listen and self.listener is not None:
-				self._pause.clear()
 				self._arm_listening()
 
 	def _is_echo(self, transcript: str) -> bool:
@@ -434,55 +432,65 @@ class ConversationManager:
 	def _arm_listening(self) -> None:
 		"""Start a single listen thread unless one is already active or we are
 		busy. The microphone persists across threads via the Listener, so this
-		is cheap."""
+		is cheap. Thread-safe."""
 		if self.listener is None or not self.auto_listen:
 			return
 		if getattr(self, "_remote_active", False):
 			if perf_counter() - getattr(self, "_last_remote_time", 0.0) < 180:
 				return
 			self._remote_active = False
-		if self._listening or not self.running or self._pause.is_set():
+		
+		# Use lock to prevent multiple concurrent listen threads
+		if not self._listen_lock.acquire(blocking=False):
 			return
-		# Cooldown after a real microphone error so a broken device does not
-		# cause a tight re-try loop; we still recover once the device returns.
-		last_error = getattr(self, "_last_listen_error", 0.0)
-		if perf_counter() - last_error < 2.5:
-			return
-		self._listening = True
-		self.set_state("listening")
+		try:
+			if self._listening or not self.running or self._pause.is_set():
+				return
+			# Cooldown after a real microphone error so a broken device does not
+			# cause a tight re-try loop; we still recover once the device returns.
+			last_error = getattr(self, "_last_listen_error", 0.0)
+			if perf_counter() - last_error < 2.5:
+				return
+			
+			self._listening = True
+			self.set_state("listening")
 
-		def runner() -> None:
-			try:
-				while self.running and self._listening and not self._pause.is_set():
-					try:
-						result = self.listener.listen(self._pause)
-					except ListenerError as exc:
-						message = str(exc)
-						if "No speech was detected" in message:
-							if self._pause.is_set():
+			def runner() -> None:
+				try:
+					while self.running and self._listening and not self._pause.is_set():
+						try:
+							result = self.listener.listen(self._pause)
+						except ListenerError as exc:
+							message = str(exc)
+							if "No speech was detected" in message:
+								if self._pause.is_set():
+									break
+								# Brief back-off; the persistent stream keeps this cheap.
+								self._pause.wait(0.05)
+								continue
+							if "Listening cancelled" in message:
 								break
-							# Brief back-off; the persistent stream keeps this cheap.
-							self._pause.wait(0.05)
-							continue
-						if "Listening cancelled" in message:
+							if "I could not understand that" in message:
+								print(f"[VOICE INPUT] {message}")
+								self._pause.wait(0.05)
+								continue
+							self._last_listen_error = perf_counter()
+							self._listening = False
+							self._inbox.put(("listen_error", message))
 							break
-						if "I could not understand that" in message:
-							print(f"[VOICE INPUT] {message}")
-							self._pause.wait(0.05)
-							continue
-						self._last_listen_error = perf_counter()
-						self._listening = False
-						self._inbox.put(("listen_error", message))
-						break
-					else:
-						if result is not None and result.text.strip():
-							self._inbox.put(("result", result))
-							break
-			finally:
-				self._listening = False
+						else:
+							if result is not None and result.text.strip():
+								self._inbox.put(("result", result))
+								break
+				finally:
+					self._listening = False
+					self._listen_lock.release()
 
-		self._listen_thread = Thread(target=runner, name="jarvis-listen", daemon=True)
-		self._listen_thread.start()
+			self._listen_thread = Thread(target=runner, name="jarvis-listen", daemon=True)
+			self._listen_thread.start()
+		except Exception:
+			self._listen_lock.release()
+			raise
 
 	# ------------------------------------------------------------------ #
 	# Turn pipeline (classify -> quick/action/LLM -> speak)
@@ -804,9 +812,7 @@ class ConversationManager:
 			pass
 		self._finish_request(request_id)
 		self._current_intent = None
-		self.set_state("listening" if self.auto_listen else "idle")
-		if self.auto_listen and not self._is_remote_turn():
-			self._arm_listening()
+		# Don't auto-transition here - let the caller handle it
 
 	def _speak_plain(self, text: str) -> None:
 		"""Speak without a barge-in monitor (used for errors/notices)."""
@@ -821,7 +827,7 @@ class ConversationManager:
 		finally:
 			self._emit_speech(False)
 
-	def _speak_with_barge_in(self, text: str, turn: int) -> bool:
+def _speak_with_barge_in(self, text: str, turn: int) -> bool:
 		"""Speak a short fixed response while watching for interruption."""
 		print(f"[TURN {turn:03d}] SPEAKING")
 		self._remember_spoken(clean_for_speech(text))
@@ -843,52 +849,47 @@ class ConversationManager:
 		return False
 
 
-	def _start_barge_in(self):
-		"""Return (stop_event, interrupted_event, thread) for the monitor.
+def _start_barge_in(self):
+	"""Return (stop_event, interrupted_event, thread) for the monitor.
 
-		Barge-in is opt-in via the ``barge_in`` setting (default off): on
-		loudspeakers the microphone hears JARVIS's own voice, which used to
-		trigger false interruptions â€” JARVIS cut itself off mid-word, then
-		re-listened and answered its own echo. The UI Stop button and the
-		"stop" voice command always work regardless of this setting.
-		"""
-		monitor_stop = Event()
-		interrupted = Event()
-		if not bool(self.settings.get("barge_in")) or self.listener is None:
-			return monitor_stop, interrupted, None
+	Barge-in is opt-in via the ``barge_in`` setting (default off): on
+	loudspeakers the microphone hears JARVIS's own voice, which used to
+	trigger false interruptions — JARVIS cut itself off mid-word, then
+	re-listened and answered its own echo. The UI Stop button and the
+	"stop" voice command always work regardless of this setting.
+	"""
+	monitor_stop = Event()
+	interrupted = Event()
+	if not bool(self.settings.get("barge_in")) or self.listener is None:
+		return monitor_stop, interrupted, None
 
-		def monitor() -> None:
-			if self.listener.monitor_speech(monitor_stop):
-				print("[INTERRUPTION] user speech detected")
-				interrupted.set()
-				try:
-					self.speaker.stop_speaking()
-				except SpeakerError as exc:
-					print(f"[TTS] stop failed: {exc}")
+	def monitor() -> None:
+		if self.listener.monitor_speech(monitor_stop):
+			print("[INTERRUPTION] user speech detected")
+			interrupted.set()
+			try:
+				self.speaker.stop_speaking()
+			except SpeakerError as exc:
+				print(f"[TTS] stop failed: {exc}")
 
-		thread = Thread(target=monitor, name="jarvis-barge-in", daemon=True)
-		thread.start()
-		return monitor_stop, interrupted, thread
+	thread = Thread(target=monitor, name="jarvis-barge-in", daemon=True)
+	thread.start()
+	return monitor_stop, interrupted, thread
 
-	def _stop_barge_in(self, monitor_stop: Event, interrupted: Event, thread: Thread | None) -> None:
-		monitor_stop.set()
-		if thread is not None:
-			thread.join(timeout=0.5)
+def _stop_barge_in(self, monitor_stop: Event, interrupted: Event, thread: Thread | None) -> None:
+	monitor_stop.set()
+	if thread is not None:
+		thread.join(timeout=0.5)
 
-	def _announce_ready(self) -> None:
-		greeting = "JARVIS online. I am listening."
-		self._emit_message("assistant", greeting, status="done")
-		self.set_state("listening")# ------------------------------------------------------------------ #
-	# Reasoning helpers (intent, safe actions, quick responses, context)
-	# ------------------------------------------------------------------ #
 
-	def _absorb_interrupt(self) -> None:
-		"""After an interruption, immediately re-arm listening so the user's
-		in-progress utterance is captured from its start rather than skipped."""
-		self.set_state("interrupted")
-		if self.auto_listen and self.listener is not None:
-			self._pause.clear()
-			self._arm_listening()
+def _absorb_interrupt(self) -> None:
+	"""After an interruption, immediately re-arm listening so the user's
+	in-progress utterance is captured from its start rather than skipped."""
+	self.set_state("interrupted")
+	if self.auto_listen and self.listener is not None:
+		# Ensure we're not paused, then re-arm
+		self._pause.clear()
+		self._arm_listening()
 
 	def _ready_stream(self) -> None:
 		"""Open a fresh assistant message box on the UI for streaming output."""
@@ -1379,9 +1380,26 @@ class ConversationManager:
 		if any(phrase in normalized for phrase in ("thank you", "thanks", "thank you jarvis", "thanks jarvis")):
 			return "Anytime."
 		if normalized in {"what is my name", "what's my name", "do you know my name"}:
-			name = self.preference_store.snapshot().get("user_facts", {}).get("name", "Aayush")
+			# Safe access to preference_store
+			store = getattr(self, "preference_store", None)
+			if store and hasattr(store, "snapshot"):
+				name = store.snapshot().get("user_facts", {}).get("name", "Aayush")
+			else:
+				name = "Aayush"
 			return f"You're {name}."
 		return None
+
+	def _voice_response(self, text: str, intent_type: str, user_input: str) -> str:
+		"""Truncate a response to one sentence for voice output."""
+		# Simple sentence splitting - first sentence only
+		import re
+		sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+		if not sentences:
+			return ""
+		first = sentences[0].strip()
+		if not first.endswith((".", "!", "?")):
+			first += "."
+		return first
 
 	def _needs_openjarvis(self, text: str) -> bool:
 		"""Return True for knowledge, research, and multi-step reasoning tasks."""
