@@ -99,7 +99,9 @@ def get_tunnel_token() -> str | None:
     if TUNNEL_TOKEN_FILE.is_file():
         try:
             val = TUNNEL_TOKEN_FILE.read_text(encoding="utf-8").strip()
-            if val:
+            # A real Cloudflare tunnel token is a long base64/JWT string (typically 50+ chars).
+            # Skip placeholder comments and short values.
+            if val and len(val) > 30 and not val.startswith("#"):
                 return val
         except Exception:
             pass
