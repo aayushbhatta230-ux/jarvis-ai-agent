@@ -881,6 +881,15 @@ class ConversationManager:
 		if thread is not None:
 			thread.join(timeout=0.5)
 
+	# ------------------------------------------------------------------ #
+	# Reasoning helpers (intent, safe actions, quick responses, context)
+	# ------------------------------------------------------------------ #
+
+	def _announce_ready(self) -> None:
+		"""Tell the UI that capture is live, then move to the listening state."""
+		greeting = "JARVIS online. I am listening."
+		self._emit_message("assistant", greeting, status="done")
+		self.set_state("listening")
 
 	def _absorb_interrupt(self) -> None:
 		"""After an interruption, immediately re-arm listening so the user's
