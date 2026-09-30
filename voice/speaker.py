@@ -65,6 +65,15 @@ class Speaker:
 
 		return available[0] if available else None
 
+	def list_voices(self) -> list[str]:
+		"""Human-readable descriptions of every installed SAPI voice."""
+		with self.engine_lock:
+			voices = self.engine.GetVoices()
+			return [
+				voices.Item(index).GetDescription()
+				for index in range(voices.Count)
+			]
+
 	def _run(self) -> None:
 		try:
 			pythoncom.CoInitialize()
