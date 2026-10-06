@@ -108,3 +108,7 @@ config/ngrok_domain.txt
 /_probe.py
 /_probe_*.py
 /_fix_*.py
+.kilo/
+*_payload.json
+query_db.js
+
