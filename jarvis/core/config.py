@@ -42,7 +42,8 @@ DEFAULTS: dict[str, Any] = {
         "prefer_headset": True,
         "avoid_builtin_mic": True,
         "wake_word": True,
-        "wake_threshold": 0.5,
+        "wake_threshold": 0.5,  # instant trigger
+        "wake_confirm_threshold": 0.08,  # borderline scores are confirmed by speech recognition
         "follow_up_seconds": 6.0,
         "stt_model": "base.en",
         "stt_backend": "whisper",  # whisper | google

@@ -25,7 +25,7 @@ from jarvis.core.events import State
 from jarvis.voice import devices
 from jarvis.voice.capture import MicCapture
 from jarvis.voice.speaker_id import SpeakerRecognizer, Verification, VoiceprintStore
-from jarvis.voice.stt import STT, strip_wake_word
+from jarvis.voice.stt import STT, has_wake_word, strip_wake_word
 from jarvis.voice.tts import Speaker
 from jarvis.voice.vad import load_vad
 from jarvis.voice.wakeword import load_wakeword
@@ -80,6 +80,10 @@ class VoiceManager:
         self._recent: deque[np.ndarray] = deque(maxlen=60)  # ~2 s for wake-word speaker check
         self._wake_refractory = 0.0
         self._barge_frames = 0
+        self._passive_speech = 0  # frames of speech heard while waiting for the wake word
+        self._passive_quiet = 0
+        self._passive_best = 0.0
+        self._passive_audio: list[np.ndarray] = []
         self._jobs: queue.Queue[tuple[np.ndarray, str]] = queue.Queue()
         self._enroll_sink: queue.Queue[np.ndarray] | None = None
         self._stop = threading.Event()
@@ -253,9 +257,15 @@ class VoiceManager:
         # Wake word (also allows interrupting JARVIS by saying "Hey JARVIS")
         if self.wake is not None and (self.mode == self.PASSIVE or speaking):
             score = self.wake.process(frame)
+            if self.mode == self.PASSIVE and not speaking:
+                self._track_passive(frame, prob, score)
             if score >= float(self.cfg.get("voice.wake_threshold", 0.5)) and time.time() > self._wake_refractory:
                 self._wake_refractory = time.time() + 1.5
                 audio = np.concatenate(list(self._recent)[-45:])
+                log.info("wake word detected (score %.2f)", score)
+                self._passive_speech = self._passive_quiet = 0
+                self._passive_audio = []
+                self._passive_best = 0.0
                 if self._gate(audio, "wake"):
                     self.app.events.publish("voice.wake", score=round(score, 2))
                     self.interrupt()
@@ -281,6 +291,39 @@ class VoiceManager:
         if self.mode == self.PASSIVE and self._enroll_sink is None:
             return
         self._segment(frame, prob)
+
+    def _track_passive(self, frame: np.ndarray, prob: float, score: float) -> None:
+        """Stage 2 of wake detection: buffer each phrase heard while waiting for the wake word.
+
+        Accents and Bluetooth hands-free audio often give a real "Hey JARVIS" a score below the
+        instant-trigger threshold. Phrases whose best score passes the lower confirmation threshold
+        are transcribed when they end; if Whisper hears "Jarvis" the wake word counts, and any
+        command spoken in the same breath is executed directly.
+        """
+        if prob > 0.5:
+            if not self._passive_speech:
+                self._passive_audio = list(self._preroll)
+            self._passive_speech += 1
+            self._passive_quiet = 0
+        elif self._passive_speech:
+            self._passive_quiet += 1
+        if self._passive_speech:
+            self._passive_audio.append(frame)
+        else:
+            self._preroll.append(frame)
+        self._passive_best = max(self._passive_best, score)
+        too_long = len(self._passive_audio) * FRAME_S > 12
+        if self._passive_speech and (self._passive_quiet > 18 or too_long):
+            confirm = float(self.cfg.get("voice.wake_confirm_threshold", 0.08))
+            if self._passive_speech > 8 and self._passive_best >= confirm:
+                log.info("possible wake word (score %.2f) - confirming with speech recognition", self._passive_best)
+                self._jobs.put((np.concatenate(self._passive_audio), "wake_check"))
+            elif self._passive_speech > 8:
+                log.info("speech heard without wake word: %.1fs, best wake score %.2f",
+                         self._passive_speech * FRAME_S, self._passive_best)
+            self._passive_speech = self._passive_quiet = 0
+            self._passive_best = 0.0
+            self._passive_audio = []
 
     def _segment(self, frame: np.ndarray, prob: float) -> None:
         if not self._in_speech:
@@ -321,6 +364,7 @@ class VoiceManager:
         if mode == "off" or self.recognizer is None or not self.recognizer.enrolled:
             return True
         v = self.recognizer.verify(audio)
+        log.info("speaker check (%s): %s", what, v.label())
         self.app.events.publish("voice.speaker", what=what, score=round(v.score, 3), accepted=v.accepted,
                                 label=v.label())
         if not v.accepted and mode == "enforce":
@@ -332,15 +376,39 @@ class VoiceManager:
     def _process_loop(self) -> None:
         while not self._stop.is_set():
             try:
-                audio, _ = self._jobs.get(timeout=0.5)
+                audio, kind = self._jobs.get(timeout=0.5)
             except queue.Empty:
                 continue
             try:
-                self._process(audio)
+                if kind == "wake_check":
+                    self._confirm_wake(audio)
+                else:
+                    self._process(audio)
             except Exception as exc:  # noqa: BLE001
                 log.exception("utterance processing failed")
                 self.app.events.publish("voice.error", where="stt", error=str(exc))
                 self.app.events.state(State.RECOVERING, "speech recognition failed")
+
+    def _confirm_wake(self, audio: np.ndarray) -> None:
+        if self.mode != self.PASSIVE:
+            return  # already woken by the instant path
+        text, conf, engine = self.stt.transcribe(audio)
+        if not has_wake_word(text):
+            log.info("not the wake word: %r", text)
+            return
+        log.info("wake word confirmed by speech recognition: %r", text)
+        if not self._gate(audio, "wake"):
+            return
+        self.app.events.publish("voice.wake", score=-1.0, confirmed_by="stt")
+        self.interrupt()
+        command = strip_wake_word(text)
+        if len(command.split()) >= 2:  # "Hey JARVIS, what time is it?" in one breath
+            self.app.events.publish("voice.transcript", text=command, confidence=round(conf, 2), engine=engine,
+                                    speaker="")
+            self.on_utterance(command, Verification(0.0, True, False))
+        else:
+            self._reset_segment()
+            self._go_active(8.0)
 
     def _process(self, audio: np.ndarray) -> None:
         mode = self.cfg.get("voice.speaker_id.mode", "enforce")
@@ -358,6 +426,7 @@ class VoiceManager:
                     self.app.events.state(State.IDLE)
                 return
         text, conf, engine = self.stt.transcribe(audio)
+        log.info("heard %.1fs via %s: %r (confidence %.2f)", audio.shape[0] / 16000, engine, text, conf)
         text = strip_wake_word(text)
         self.app.events.publish("voice.transcript", text=text, confidence=round(conf, 2), engine=engine,
                                 speaker=verification.label())

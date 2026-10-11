@@ -16,7 +16,15 @@ log = logging.getLogger(__name__)
 
 _HALLUCINATIONS = {"thank you.", "thanks for watching!", "thank you for watching.", "you", ".", "bye.",
                    "subtitles by the amara.org community", "thank you very much."}
-_WAKE_PREFIX = re.compile(r"^\s*(?:(?:hey|hi|okay|ok|yo)[,\s]+)?(?:jarvis|jervis|travis|jarvi)[\s,.!?:;-]*", re.I)
+_WAKE_WORD = r"(?:jarvis|jervis|jarvas|jarves|javis|jarvish|jarbis|garvis|harvis|travis|service|jarvi|chavis|davis)"
+_WAKE_PREFIX = re.compile(
+    r"^\s*(?:(?:hey|hi|hay|ok|okay|yo|a|we're|were|where|they|he|hey,)[,\s]+)?" + _WAKE_WORD + r"\b[\s,.!?:;-]*", re.I)
+_WAKE_ANYWHERE = re.compile(r"\b" + _WAKE_WORD + r"\b", re.I)
+
+
+def has_wake_word(text: str) -> bool:
+    """True if a transcript contains "Jarvis" or a common mis-hearing of it (used to confirm wake words)."""
+    return bool(_WAKE_ANYWHERE.search(text or ""))
 
 
 def strip_wake_word(text: str) -> str:

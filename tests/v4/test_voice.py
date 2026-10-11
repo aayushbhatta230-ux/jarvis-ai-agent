@@ -142,6 +142,9 @@ def _bare_voice_manager(app):
     vm._preroll, vm._recent = deque(maxlen=10), deque(maxlen=60)
     vm._wake_refractory = 0.0
     vm._barge_frames = 0
+    vm._passive_speech = vm._passive_quiet = 0
+    vm._passive_best = 0.0
+    vm._passive_audio = []
     vm._jobs = queue.Queue()
     vm._enroll_sink = None
     vm.muted = False
@@ -241,3 +244,49 @@ def test_rejected_speaker_never_reaches_assistant(app):
 
 def test_paths_use_project_data(home):
     assert paths.data_home() == home
+
+
+def test_wake_word_matching_tolerates_mishearings():
+    from jarvis.voice.stt import has_wake_word
+
+    for heard in ("Hey Jarvis", "We're service, what time is it?", "hey jervis open chrome", "Hi Javis."):
+        assert has_wake_word(heard), heard
+    assert not has_wake_word("what's the weather like today")
+    assert strip_wake_word("We're service, what time is it?") == "what time is it?"
+
+
+def test_borderline_wake_is_confirmed_by_speech_recognition(app):
+    from jarvis.voice.pipeline import VoiceManager
+
+    vm = _bare_voice_manager(app)
+    heard = []
+    vm.on_utterance = lambda text, v: heard.append(text)
+
+    class STT:
+        def __init__(self, text):
+            self.text = text
+
+        def transcribe(self, audio):
+            return self.text, 0.8, "fake"
+
+    vm.stt = STT("Hey Jarvis, what time is it?")
+    vm._confirm_wake(np.zeros(16000, dtype=np.float32))
+    assert heard == ["what time is it?"]          # wake + command in one breath
+    vm.mode = VoiceManager.PASSIVE
+    vm.stt = STT("Hey Jarvis.")
+    vm._confirm_wake(np.zeros(16000, dtype=np.float32))
+    assert vm.mode == VoiceManager.ACTIVE          # wake only -> listen for the command
+    vm.mode = VoiceManager.PASSIVE
+    vm.stt = STT("the weather is nice")
+    vm._confirm_wake(np.zeros(16000, dtype=np.float32))
+    assert vm.mode == VoiceManager.PASSIVE and len(heard) == 1
+
+
+def test_passive_phrase_with_borderline_score_is_queued(app):
+    vm = _bare_voice_manager(app)
+    for _ in range(20):
+        vm._track_passive(np.full(512, 0.2, np.float32), 0.9, 0.3)
+    for _ in range(20):
+        vm._track_passive(np.zeros(512, np.float32), 0.0, 0.0)
+    audio, kind = vm._jobs.get_nowait()
+    assert kind == "wake_check" and audio.shape[0] >= 20 * 512
