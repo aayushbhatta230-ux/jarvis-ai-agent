@@ -45,7 +45,7 @@ def resample(x: np.ndarray, src: int, dst: int) -> np.ndarray:
 
 # --------------------------------------------------------------------- player
 class Player:
-    BLOCK = 1024
+    BLOCK = 2048  # larger blocks + "high" latency: no stutter under CPU load / Bluetooth
 
     def __init__(self, on_level: Callable[[float], None] | None = None) -> None:
         self.on_level = on_level
@@ -66,7 +66,7 @@ class Player:
         rate = device.samplerate if device else 48000
         try:
             self._stream = sd.OutputStream(device=idx, samplerate=rate, channels=1, dtype="float32",
-                                           blocksize=self.BLOCK, callback=self._callback, latency="low")
+                                           blocksize=self.BLOCK, callback=self._callback, latency="high")
         except Exception as exc:  # noqa: BLE001 - some WASAPI devices need 2 channels or their own rate
             log.warning("output open failed (%s); retrying stereo/default", exc)
             self._stream = sd.OutputStream(device=idx, samplerate=rate, channels=2, dtype="float32",
@@ -163,7 +163,11 @@ class SapiSynth:
     def __init__(self, voice_hint: str = "", rate_pct: int = 0) -> None:
         self.voice_hint = voice_hint
         self.rate_pct = rate_pct
-        self._engine = None
+        self._local = threading.local()  # COM objects must stay on the thread that created them
+
+    @property
+    def _engine(self):  # noqa: ANN202
+        return getattr(self._local, "engine", None)
 
     def _ensure(self) -> None:
         if self._engine is not None:
@@ -185,7 +189,7 @@ class SapiSynth:
                 continue
             break
         eng.Rate = int(max(-10, min(10, self.rate_pct / 10)))
-        self._engine = eng
+        self._local.engine = eng
 
     def synth(self, text: str) -> np.ndarray:
         import win32com.client
@@ -222,7 +226,9 @@ class Speaker:
         self._busy = threading.Event()
         self.last_engine = ""
         self._edge_failures = 0
+        self._cache: dict[str, tuple[np.ndarray, int]] = {}
         threading.Thread(target=self._worker, name="jarvis-tts", daemon=True).start()
+        threading.Thread(target=self.precache, name="jarvis-tts-cache", daemon=True).start()
 
     # ------------------------------------------------------------ public api
     def open(self, device: Device | None) -> None:
@@ -287,7 +293,25 @@ class Speaker:
             if self.on_state:
                 self.on_state(True)
 
+    CACHED_PHRASES = ("On it.", "Right away.", "Working on it.", "Give me a moment.", "Certainly.", "Approved.",
+                      "Understood, I won't do that.", "Yes?", "Listening.")
+
+    def precache(self) -> None:
+        """Synthesise short stock phrases ahead of time so they play with no network delay."""
+        for phrase in self.CACHED_PHRASES:
+            if phrase not in self._cache:
+                try:
+                    self._cache[phrase] = self._synth_uncached(phrase)
+                except Exception:  # noqa: BLE001
+                    break
+
     def _synth(self, text: str) -> tuple[np.ndarray, int]:
+        hit = self._cache.get(text.strip())
+        if hit is not None:
+            return hit
+        return self._synth_uncached(text)
+
+    def _synth_uncached(self, text: str) -> tuple[np.ndarray, int]:
         if self.primary is not None and self._edge_failures < 3:
             try:
                 pcm = self.primary.synth(text)

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import threading
 import time
 from collections import deque
@@ -61,7 +62,11 @@ class VoiceManager:
             on_level=lambda lv: self._level("tts", lv), on_state=self._tts_state)
         self.vad = load_vad(models)
         self.wake = load_wakeword(models)  # loaded even when off, so the setting can change live
-        self.stt = STT(models, self.cfg.get("voice.stt_backend", "whisper"), self.cfg.get("voice.stt_model", "base.en"))
+        self.stt = STT(models, self.cfg.get("voice.stt_backend", "google"), self.cfg.get("voice.stt_model", "base.en"),
+                       self.cfg.get("voice.stt_language", "en-IN"))
+        self.wake_aliases: list[str] = list(app.db.kv_get("wake_aliases", []) or [])
+        self._tap: list[np.ndarray] | None = None
+        self._speech_end = 0.0
         try:
             self.recognizer: SpeakerRecognizer | None = SpeakerRecognizer(models)
         except Exception as exc:  # noqa: BLE001
@@ -164,6 +169,7 @@ class VoiceManager:
             "tts": self.speaker.last_engine or ("edge" if self.speaker.primary else "sapi"),
             "speaker_id": "unavailable" if rec is None else ("enrolled" if rec.enrolled else "not enrolled"),
             "speaker_id_mode": self.cfg.get("voice.speaker_id.mode", "enforce"),
+            "wake_trained": bool(self.wake_aliases),
             "muted": self.muted,
         }
 
@@ -187,7 +193,7 @@ class VoiceManager:
 
     def follow_up(self) -> None:
         """Keep listening for a follow-up without the wake word."""
-        self._go_active(float(self.cfg.get("voice.follow_up_seconds", 6.0)))
+        self._go_active(float(self.cfg.get("voice.follow_up_seconds", 10.0)))
 
     def _go_active(self, seconds: float) -> None:
         if self.mode != self.ACTIVE:
@@ -244,6 +250,8 @@ class VoiceManager:
                     self._do_reopen()
                     self._last_frame = time.time()
                 continue
+            if self._tap is not None:
+                self._tap.append(frame)
             if self.muted:
                 continue
             try:
@@ -319,9 +327,12 @@ class VoiceManager:
         too_long = len(self._passive_audio) * FRAME_S > 12
         if self._passive_speech and (self._passive_quiet > 18 or too_long):
             seconds = self._passive_speech * FRAME_S
-            if self._passive_speech > 8 and seconds <= 9:
+            cloud = self.cfg.get("voice.wake_check", "cloud") == "cloud"
+            candidate = cloud or self._passive_best >= float(self.cfg.get("voice.wake_confirm_threshold", 0.08))
+            if self._passive_speech > 8 and seconds <= 7 and candidate:
                 log.info("phrase heard (%.1fs, wake score %.2f) - checking for the wake word", seconds,
                          self._passive_best)
+                self._speech_end = time.time()
                 self._jobs.put((np.concatenate(self._passive_audio), "wake_check"))
             self._passive_speech = self._passive_quiet = 0
             self._passive_best = 0.0
@@ -345,7 +356,7 @@ class VoiceManager:
         self._speech.append(frame)
         self._silence = self._silence + 1 if prob < 0.35 else 0
         duration = len(self._speech) * FRAME_S
-        if self._silence * FRAME_S >= 0.8 or duration > 25:
+        if self._silence * FRAME_S >= float(self.cfg.get("voice.end_silence", 0.6)) or duration > 25:
             audio = np.concatenate(self._speech)
             voiced_s = duration - self._silence * FRAME_S
             self._reset_segment()
@@ -355,6 +366,7 @@ class VoiceManager:
             if self._enroll_sink is not None:
                 self._enroll_sink.put(audio)
                 return
+            self._speech_end = time.time()
             self._jobs.put((audio, "utterance"))
             self.app.events.state(State.PROCESSING, "transcribing")
             if self._wake_enabled():
@@ -395,16 +407,18 @@ class VoiceManager:
         if self.mode != self.PASSIVE:
             return  # already woken by the instant path
         self._save_clip(audio, "phrase")
-        text, conf, engine = self.stt.transcribe(audio, prompt="Hey JARVIS.", hotwords="JARVIS")
-        if not has_wake_word(text):
-            log.info("not the wake word: %r", text)
+        t = time.time()
+        text, conf, engine = self.stt.transcribe(audio)
+        stt_s = time.time() - t
+        if not has_wake_word(text, self.wake_aliases):
+            log.info("not the wake word (%s %.1fs): %r", engine, stt_s, text)
             return
-        log.info("wake word confirmed by speech recognition: %r", text)
+        log.info("wake word confirmed (%s %.1fs): %r", engine, stt_s, text)
         if not self._gate(audio, "wake"):
             return
         self.app.events.publish("voice.wake", score=-1.0, confirmed_by="stt")
         self.interrupt()
-        command = strip_wake_word(text)
+        command = strip_wake_word(text, self.wake_aliases)
         if len(command.split()) >= 2:  # "Hey JARVIS, what time is it?" in one breath
             self.app.events.publish("voice.transcript", text=command, confidence=round(conf, 2), engine=engine,
                                     speaker="")
@@ -452,15 +466,89 @@ class VoiceManager:
                 if not self.wake:
                     self.app.events.state(State.IDLE)
                 return
+        t = time.time()
         text, conf, engine = self.stt.transcribe(audio)
-        log.info("heard %.1fs via %s: %r (confidence %.2f)", audio.shape[0] / 16000, engine, text, conf)
-        text = strip_wake_word(text)
+        log.info("heard %.1fs via %s in %.1fs: %r", audio.shape[0] / 16000, engine, time.time() - t, text)
+        text = strip_wake_word(text, self.wake_aliases)
         self.app.events.publish("voice.transcript", text=text, confidence=round(conf, 2), engine=engine,
                                 speaker=verification.label())
         if not text:
             self.app.events.state(State.IDLE if self.wake else State.LISTENING)
             return
         self.on_utterance(text, verification)
+
+    # ----------------------------------------------------------- mic check
+    def mic_check(self, seconds: float = 5.0) -> dict[str, Any]:
+        """Record the microphone and report whether the signal is clear enough for recognition."""
+        self.interrupt()
+        self._tap = []
+        time.sleep(seconds)
+        frames, self._tap = self._tap, None
+        if not frames:
+            raise RuntimeError("no audio arrived from the microphone - is it muted or disconnected?")
+        a = np.concatenate(frames)
+        n = len(a) // 320
+        rms = np.sqrt((a[: n * 320].reshape(n, 320) ** 2).mean(axis=1))
+        peak = float(np.abs(a).max())
+        speech_frames = rms > max(0.01, float(np.percentile(rms, 30)) * 4)
+        spec = np.abs(np.fft.rfft(a)) ** 2
+        freqs = np.fft.rfftfreq(len(a), 1 / 16000)
+        high = float(spec[freqs > 3500].sum() / (spec.sum() + 1e-12))
+        text, _conf, engine = self.stt.transcribe(a) if speech_frames.mean() > 0.05 else ("", 0.0, "-")
+        notes = []
+        if peak < 0.05:
+            notes.append("Very quiet: move the mic closer or raise the headset microphone level in Windows.")
+        if peak > 0.98:
+            notes.append("Clipping: lower the microphone level.")
+        if high < 0.002:
+            notes.append("Bluetooth hands-free (telephone-quality) audio: recognition works but is less "
+                         "accurate than a wired/USB mic.")
+        if speech_frames.mean() < 0.05:
+            notes.append("No speech detected - say a sentence during the check.")
+        report = {"device": self.input_device.name if self.input_device else "?", "seconds": round(len(a) / 16000, 1),
+                  "peak": round(peak, 3), "speech_level": round(float(rms[speech_frames].mean()) if speech_frames.any()
+                                                                else 0.0, 3),
+                  "noise_floor": round(float(np.percentile(rms, 10)), 4), "wideband": high >= 0.002,
+                  "heard": text, "engine": engine, "notes": notes,
+                  "ok": 0.05 <= peak <= 0.98 and bool(text)}
+        log.info("mic check: %s", report)
+        self.app.events.publish("voice.mic_check", **report)
+        return report
+
+    def train_wake(self, samples: int = 5, timeout: float = 15.0) -> dict[str, Any]:
+        """Learn how the recogniser hears this user's "Hey JARVIS" (accent/headset specific)."""
+        sink: queue.Queue[np.ndarray] = queue.Queue()
+        heard: list[str] = []
+        self.interrupt()
+        self._reset_segment()
+        self._enroll_sink = sink
+        try:
+            for i in range(samples):
+                self.app.events.publish("voice.enroll", step=i + 1, total=samples, phrase="Hey JARVIS")
+                self.mode = self.ACTIVE
+                self._active_deadline = time.time() + timeout
+                try:
+                    audio = sink.get(timeout=timeout)
+                except queue.Empty as exc:
+                    raise RuntimeError("didn't hear anything - check the microphone") from exc
+                text, _c, _e = self.stt.transcribe(audio)
+                heard.append(text)
+                log.info("wake training sample %d: %r", i + 1, text)
+        finally:
+            self._enroll_sink = None
+            self._go_passive()
+        learned = sorted({re.sub(r"[^\w' ]", "", h).strip().lower() for h in heard if h.strip()} - {""})
+        learned = [w for w in learned if len(w) >= 3 and len(w.split()) <= 4]
+        aliases = sorted(set(self.wake_aliases) | set(learned))
+        self.wake_aliases = aliases
+        self.app.db.kv_set("wake_aliases", aliases)
+        recognised = sum(1 for h in heard if has_wake_word(h, aliases))
+        self._publish_status()
+        return {"heard": heard, "learned": learned, "recognised": recognised, "samples": samples}
+
+    def forget_wake_training(self) -> None:
+        self.wake_aliases = []
+        self.app.db.kv_set("wake_aliases", [])
 
     # ------------------------------------------------------------ enrolment
     def enroll(self, name: str, phrases: list[str] | None = None,

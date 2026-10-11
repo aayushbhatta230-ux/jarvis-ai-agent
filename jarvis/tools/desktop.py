@@ -72,9 +72,23 @@ def active_window() -> dict[str, Any] | None:
     return _window_info(hwnd) if hwnd else None
 
 
+_PROCESS_ALIASES = {
+    "vs code": "code", "vscode": "code", "visual studio code": "code", "code": "code", "chrome": "chrome",
+    "google chrome": "chrome", "edge": "msedge", "microsoft edge": "msedge", "word": "winword", "excel": "excel",
+    "powerpoint": "powerpnt", "file explorer": "explorer", "explorer": "explorer", "terminal": "windowsterminal",
+    "windows terminal": "windowsterminal", "notepad": "notepad", "calculator": "calculatorapp", "spotify": "spotify",
+    "task manager": "taskmgr", "paint": "mspaint", "settings": "systemsettings", "visual studio": "devenv",
+}
+
+
 def find_window(query: str) -> dict[str, Any] | None:
     q = query.lower().strip()
     wins = list_top_windows()
+    proc = _PROCESS_ALIASES.get(q)
+    if proc:
+        for w in wins:
+            if w["process"].lower().removesuffix(".exe") == proc:
+                return w
     for w in wins:  # exact process name first
         if w["process"].lower().removesuffix(".exe") == q.removesuffix(".exe"):
             return w
@@ -133,10 +147,13 @@ def close_window(ctx: ToolContext, query: str) -> ToolResult:
     if not w:
         raise ToolError(f"no open window matches '{query}'")
     win32gui.PostMessage(w["hwnd"], win32con.WM_CLOSE, 0, 0)
-    for _ in range(20):
+    for _ in range(30):
         time.sleep(0.15)
         if not win32gui.IsWindow(w["hwnd"]) or not win32gui.IsWindowVisible(w["hwnd"]):
-            return ToolResult(True, output=f"closed '{w['title']}'")
+            others = [x for x in list_top_windows() if x["process"] == w["process"]]
+            extra = f"; {len(others)} other {w['process']} window(s) still open" if others else ""
+            return ToolResult(True, output=f"closed '{w['title']}' (verified: window is gone){extra}",
+                              data={"remaining_same_app": len(others)})
     return ToolResult(False, error=f"'{w['title']}' is still open (it may be showing a save prompt)")
 
 
@@ -233,9 +250,20 @@ def launch_app(ctx: ToolContext, name: str, args: str = "") -> ToolResult:
         launched = target
     else:
         exe = target if target.lower().endswith(".exe") else f"{target}.exe"
-        path = shutil.which(target) or shutil.which(exe) or _app_paths(exe)
+        path = shutil.which(exe) or _app_paths(exe) or shutil.which(target)
+        if path and path.lower().endswith((".cmd", ".bat")):
+            # e.g. VS Code's bin\code.cmd: prefer the real executable so no console window appears
+            from pathlib import Path as _P
+
+            stem = _P(path).stem.lower()
+            for folder in (_P(path).parent, _P(path).parent.parent):
+                hit = next((p for p in folder.glob("*.exe") if p.stem.lower() == stem), None)
+                if hit:
+                    path = str(hit)
+                    break
         if path:
-            subprocess.Popen([path, *([args] if args else [])], creationflags=0, close_fds=True)
+            flags = CREATE_NO_WINDOW if path.lower().endswith((".cmd", ".bat")) else 0
+            subprocess.Popen([path, *([args] if args else [])], creationflags=flags, close_fds=True)
             launched = path
         else:
             app = _match_start_app(name)
@@ -244,18 +272,35 @@ def launch_app(ctx: ToolContext, name: str, args: str = "") -> ToolResult:
                 launched = f"{app['Name']} ({app['AppID']})"
     if not launched:
         raise ToolError(f"could not find an installed application called '{name}'")
-    # Verify: wait for a new top-level window (or an existing one coming to front)
-    for _ in range(40):
+    # Verify: a window that belongs to THIS app must appear (any random new window doesn't count)
+    from pathlib import Path as _P
+
+    expected = {_PROCESS_ALIASES.get(key, ""), _P(launched.split(" (")[0]).stem.lower(), key.replace(" ", "")}
+    expected.discard("")
+    words = [w for w in key.split() if len(w) > 2]
+
+    def belongs(w: dict[str, Any]) -> bool:
+        proc = w["process"].lower().removesuffix(".exe")
+        return proc in expected or any(word in w["title"].lower() for word in words)
+
+    unrelated: list[str] = []
+    for _ in range(48):
         if ctx.cancel.wait(0.25):
             break
-        wins = list_top_windows()
-        new = [w for w in wins if w["hwnd"] not in before]
-        if new:
-            return ToolResult(True, output=f"launched {launched}; new window '{new[0]['title']}' ({new[0]['process']})",
-                              data=new[0])
+        for w in list_top_windows():
+            if w["hwnd"] in before:
+                continue
+            if belongs(w):
+                return ToolResult(True, output=f"launched {name}: window '{w['title']}' ({w['process']}) is open "
+                                  f"(verified)", data={**w, "verified": True})
+            if w["title"] not in unrelated:
+                unrelated.append(f"{w['title']} ({w['process']})")
     fg = active_window()
-    return ToolResult(True, output=f"launched {launched}; no new window detected within 10s "
-                      f"(it may reuse an existing window). Foreground: {fg['title'] if fg else '?'}",
+    if fg and belongs(fg):
+        return ToolResult(True, output=f"{name} is in the foreground: '{fg['title']}' (existing window reused)",
+                          data={**fg, "verified": True})
+    return ToolResult(False, error=f"started {launched} but no {name} window appeared within 12s"
+                      + (f"; other new windows: {', '.join(unrelated[:3])}" if unrelated else ""),
                       data={"verified": False})
 
 

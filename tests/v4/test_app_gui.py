@@ -137,3 +137,31 @@ def test_gui_builds_reacts_and_stays_responsive(app):
     win.hotkeys.unregister_all()
     win.tray.hide()
     win.close()
+
+
+@pytest.mark.parametrize("text", ["I said, can you close VS Code?", "VS Code close it", "please could the volume go down"])
+def test_action_verbs_anywhere_route_to_agent(text):
+    from jarvis.app import _ACTION_ANYWHERE
+
+    assert _ACTION_ANYWHERE.search(text) or _ACTION.match(text)
+
+
+def test_chat_model_cannot_claim_actions(app):
+    """If the tool-less chat model claims it did something, the request goes to the agent instead."""
+    msgs, started = [], []
+    app.events.subscribe("assistant.message", lambda e: msgs.append(e.data["text"]))
+    app.events.subscribe("assistant.task_started", lambda e: started.append(e.data["goal"]))
+    app.start(voice=False)
+    FakeProvider.scripts = {"fake": [reply("Sure thing. VS Code is now closed, sir."),
+                                     reply(calls=[("task_complete", {"summary": "Checked windows.", "verified": True})])]}
+    app.submit_input("hmm what about that editor thing")
+    assert _wait(lambda: started) and _wait(lambda: "Checked windows." in msgs)
+    assert not any("VS Code is now closed" in m for m in msgs)
+
+
+def test_quick_answers_need_no_model(app):
+    from jarvis.app import Jarvis
+
+    assert Jarvis._quick_answer("what time is it?").startswith("It's ")
+    assert "day" not in Jarvis._quick_answer("open notepad")
+    assert Jarvis._quick_answer("what's the date").startswith("It's ")

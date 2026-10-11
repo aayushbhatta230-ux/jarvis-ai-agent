@@ -47,6 +47,8 @@ AGENT_METHOD = (
 CHAT_RULES = (
     "This is a live voice/text conversation. Keep replies short: 1-3 sentences for casual talk, more only if the "
     "user asks for detail or explanation. No markdown headings or bullet lists in spoken replies.\n"
+    "In this mode you have NO tools: you cannot open, close, change or check anything, so never say or imply "
+    "that you did (no 'VS Code is closed now', no 'I'll open it'). "
     "If the user's message requires DOING something on the computer (opening/controlling apps, files, commands, "
     "code changes, screen inspection, web research, reminders, scheduling, remembering things, system info), reply "
     "with exactly [[ACTION]] and nothing else - a separate agent with tools will handle it."

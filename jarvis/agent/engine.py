@@ -218,9 +218,9 @@ class AgentEngine:
             screen = self.app.screen.context.summary(1200)
         system = "\n\n".join(filter(None, [
             prompts.identity(cfg),
-            prompts.environment_block(self.db.kv_get("last_project")),
             prompts.AGENT_METHOD,
             prompts.SAFETY,
+            prompts.environment_block(self.db.kv_get("last_project")),
             ("Relevant memory:\n" + memory) if memory else "",
             ("Current screen awareness:\n" + screen) if screen else "",
         ]))

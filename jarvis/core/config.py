@@ -44,9 +44,12 @@ DEFAULTS: dict[str, Any] = {
         "wake_word": True,
         "wake_threshold": 0.5,  # instant trigger
         "wake_confirm_threshold": 0.08,  # borderline scores are confirmed by speech recognition
-        "follow_up_seconds": 6.0,
+        "follow_up_seconds": 10.0,  # keep the conversation open after each reply
+        "end_silence": 0.6,  # seconds of silence that end an utterance
         "stt_model": "base.en",
-        "stt_backend": "whisper",  # whisper | google
+        "stt_backend": "google",  # google (accurate on Bluetooth headsets) | whisper (offline)
+        "stt_language": "en-IN",
+        "wake_check": "cloud",  # cloud: verify short phrases with Google | local: only likely wake phrases
         "tts_backend": "edge",  # edge | sapi
         "tts_voice": "en-GB-RyanNeural",
         "tts_rate": 0,  # percent, -50..+50

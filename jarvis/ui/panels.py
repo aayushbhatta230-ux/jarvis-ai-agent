@@ -672,6 +672,8 @@ class SettingsPanel(QScrollArea):
         f2.addRow("Status", self.sid_status)
         lay.addLayout(f2)
         row = QHBoxLayout()
+        row.addWidget(button("Test microphone", self._mic_test))
+        row.addWidget(button("Train wake word", self._train_wake))
         row.addWidget(button("Enrol my voice", self._enroll, "Primary"))
         row.addWidget(button("Forget my voice", self._forget_voice, "Danger"))
         row.addStretch(1)
@@ -835,6 +837,40 @@ class SettingsPanel(QScrollArea):
                                        f"{res['consistency']:.2f}). I'll now recognise you in real time.")
         self.update_voice_status()
 
+    def _mic_test(self) -> None:
+        v = self.app.voice
+        if v is None:
+            self.enroll_prompt.setText("Voice isn't running yet.")
+            return
+        self.enroll_prompt.setText("Speak a normal sentence for 5 seconds…")
+
+        def done(rep: dict[str, Any] | None, err: Exception | None) -> None:
+            if err or not rep:
+                self.enroll_prompt.setText(f"Mic test failed: {err}")
+                return
+            self.enroll_prompt.setText(
+                ("✓ Microphone OK" if rep["ok"] else "⚠ Needs attention") + f" — {rep['device']}\n"
+                f"Heard: “{rep['heard'] or '—'}”  ·  peak {rep['peak']}  ·  "
+                f"{'wideband' if rep['wideband'] else 'Bluetooth telephone-band'} audio\n" + "\n".join(rep["notes"]))
+
+        run_bg(lambda: v.mic_check(5.0), done)
+
+    def _train_wake(self) -> None:
+        v = self.app.voice
+        if v is None:
+            self.enroll_prompt.setText("Voice isn't running yet.")
+            return
+        self.enroll_prompt.setText("Say “Hey JARVIS” each time you're prompted…")
+
+        def done(res: dict[str, Any] | None, err: Exception | None) -> None:
+            if err or not res:
+                self.enroll_prompt.setText(f"Training failed: {err}")
+                return
+            self.enroll_prompt.setText(f"Learned how you say it: {', '.join(res['learned']) or '—'} "
+                                       f"({res['recognised']}/{res['samples']} recognised)")
+
+        run_bg(lambda: v.train_wake(5), done)
+
     def _forget_voice(self) -> None:
         if self.app.voice and QMessageBox.question(self, "Forget voice", "Delete your stored voiceprint?") == \
                 QMessageBox.StandardButton.Yes:
@@ -911,6 +947,7 @@ class SettingsPanel(QScrollArea):
             if v.speaker.primary is not None:
                 v.speaker.primary.voice = self.tts_voice.currentText().strip()
                 v.speaker.primary.rate_pct = self.rate.value()
+            v.speaker._cache.clear()  # cached phrases used the old voice/rate
             new_devices = (cfg.get("voice.input_device"), cfg.get("voice.output_device"),
                            cfg.get("voice.prefer_headset"), cfg.get("voice.avoid_builtin_mic"))
             if new_devices != old_devices:

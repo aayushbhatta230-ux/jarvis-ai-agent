@@ -320,8 +320,8 @@ class HoloDashboard(QWidget):
             ("⟳", "Self-test", lambda: self.open_tab("system:selftest")),
             ("◎", "Screen", lambda: self.send_cb("What's on my screen right now? Point out anything wrong.")),
             ("☀", "Briefing", lambda: self.send_cb("Give me my daily briefing.")),
-            ("⛁", "Backup", self._backup),
-            ("🎙", "My voice", lambda: self.open_tab("settings")),
+            ("🎤", "Mic test", self._mic_test),
+            ("🗣", "Train wake", self._train_wake),
             ("⚙", "Settings", lambda: self.open_tab("settings")),
         ):
             b = QToolButton()
@@ -547,6 +547,16 @@ class HoloDashboard(QWidget):
         elif t in ("notify", "screen.alert"):
             self._event_line(f"{d.get('title', d.get('window', ''))}: {d.get('message', ' '.join(d.get('lines', [])))[:90]}",
                              theme.AMBER)
+        elif t == "voice.enroll":
+            self.chat.add_system(f"({d['step']}/{d['total']})  Say: “{d['phrase']}”")
+            self.state_label.setText(f"Say “{d['phrase']}”  ({d['step']}/{d['total']})")
+        elif t == "voice.mic_check":
+            verdict = "✓ Microphone OK" if d["ok"] else "⚠ Microphone needs attention"
+            lines = [f"{verdict} — {d['device']}",
+                     f"peak {d['peak']}, speech level {d['speech_level']}, noise floor {d['noise_floor']}, "
+                     f"{'wideband' if d['wideband'] else 'Bluetooth telephone-band'} audio",
+                     f"Heard ({d['engine']}): “{d['heard'] or '—'}”"] + list(d.get("notes", []))
+            self.chat.add_system("\n".join(lines))
         elif t == "memory.added":
             self._event_line(f"remembered: {d['content'][:80]}", theme.GREEN)
 
@@ -582,6 +592,41 @@ class HoloDashboard(QWidget):
             self.app.agent.unpause(run.id)
         else:
             self.app.agent.pause(run.id)
+
+    def _mic_test(self) -> None:
+        voice = self.app.voice
+        if voice is None:
+            self.chat.add_system("Voice isn't running yet.")
+            return
+        self.chat.add_system("Mic test: speak a normal sentence for the next 5 seconds…")
+
+        def work() -> None:
+            try:
+                voice.mic_check(5.0)
+            except Exception as exc:  # noqa: BLE001
+                self.app.events.publish("notice", text=f"Mic test failed: {exc}")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _train_wake(self) -> None:
+        voice = self.app.voice
+        if voice is None:
+            self.chat.add_system("Voice isn't running yet.")
+            return
+        self.chat.add_system("Wake-word training: say “Hey JARVIS” each time you're prompted, naturally, "
+                             "with a short pause after.")
+
+        def work() -> None:
+            try:
+                res = voice.train_wake(5)
+                heard = "; ".join(f"“{h or '—'}”" for h in res["heard"])
+                self.app.events.publish("assistant.message", final=True, text=(
+                    f"Wake-word training done. I heard: {heard}. "
+                    f"I'll now recognise {res['recognised']}/{res['samples']} of those as you calling me."))
+            except Exception as exc:  # noqa: BLE001
+                self.app.events.publish("notice", text=f"Wake training failed: {exc}")
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _backup(self) -> None:
         def work() -> None:

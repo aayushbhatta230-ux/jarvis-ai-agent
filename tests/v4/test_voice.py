@@ -145,6 +145,9 @@ def _bare_voice_manager(app):
     vm._passive_speech = vm._passive_quiet = 0
     vm._passive_best = 0.0
     vm._passive_audio = []
+    vm.wake_aliases = []
+    vm._tap = None
+    vm._speech_end = 0.0
     vm._jobs = queue.Queue()
     vm._enroll_sink = None
     vm.muted = False
@@ -291,3 +294,20 @@ def test_passive_phrase_with_borderline_score_is_queued(app):
         vm._track_passive(np.zeros(512, np.float32), 0.0, 0.0)
     audio, kind = vm._jobs.get_nowait()
     assert kind == "wake_check" and audio.shape[0] >= 20 * 512
+
+
+def test_learned_wake_aliases_match_users_pronunciation():
+    from jarvis.voice.stt import has_wake_word
+
+    aliases = ["rajasthani", "jay vishay"]
+    assert has_wake_word("Rajasthani close Visual Studio", aliases)
+    assert strip_wake_word("Rajasthani close Visual Studio", aliases) == "close Visual Studio"
+    assert has_wake_word("jay vishay mein audible to you", aliases)
+    assert not has_wake_word("Rajasthani close Visual Studio")  # only once learned
+    assert not has_wake_word("open the file please", aliases)
+
+
+def test_transcript_junk_is_dropped():
+    assert clean_transcript("VS Code, PowerShell, PowerShell, PowerShell, PowerShell, PowerShell") == ""
+    assert clean_transcript("We'll see you in the next video.") == ""
+    assert clean_transcript("can you close vs code") == "can you close vs code"

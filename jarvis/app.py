@@ -43,6 +43,18 @@ _ACTION = re.compile(
     r"|upgrade|kill|stop\s+the|restart|compare|summary|focus|start\s+a)\b")
 _SCREENISH = re.compile(r"(?i)\b(on|at)\s+(my|the)\s+screen\b|what('?s| is) (wrong|happening|this)|this (error|window|code)"
                         r"|what am i (doing|working on)|my (open )?windows")
+# An action verb anywhere in a short request ("I said, can you close VS Code?") means the agent handles it.
+_ACTION_ANYWHERE = re.compile(
+    r"(?i)\b(open|close|launch|start|quit|exit|kill|play|pause|resume|skip|mute|unmute|turn (on|off|up|down)"
+    r"|volume|create|make|write|save|delete|remove|move|rename|copy|find|search|download|install|run|fix|build"
+    r"|commit|push|remind|schedule|type|click|press|scroll|minimi[sz]e|maximi[sz]e|lock|shut ?down|restart"
+    r"|screenshot|my screen|on screen|switch to|go to|send|email|organi[sz]e|clean up|check)\b")
+# A chat reply must never claim to have done something: only the agent's verified tools can do that.
+_CLAIM = re.compile(
+    r"(?i)\[\[|\b(i('ve| have)? (just )?(opened|closed|launched|started|created|deleted|removed|moved|saved|sent"
+    r"|played|paused|muted|set|turned|installed|ran|typed|clicked)|(is|are) now (open|closed|running|playing|muted"
+    r"|paused|off|on)|i('ll| will) (now |go ahead and )?(open|close|launch|start|create|delete|play|pause|turn|set"
+    r"|install|run|type|click))\b")
 _STOP = re.compile(r"(?i)^\s*(stop|cancel|abort|never ?mind|shut up|be quiet|quiet|that'?s enough|enough)\W*$")
 _YES = re.compile(r"(?i)^\s*(yes|yeah|yep|sure|go ahead|do it|approve|approved|confirm|ok(ay)?|affirmative)\b")
 _NO = re.compile(r"(?i)^\s*(no|nope|don'?t|do not|deny|denied|cancel|stop|negative)\b")
@@ -95,6 +107,7 @@ class Jarvis:
         threading.Thread(target=self._input_loop, name="jarvis-conversation", daemon=True).start()
         threading.Thread(target=self._warm_up, name="jarvis-warmup", daemon=True).start()
         threading.Thread(target=self._daily_maintenance, name="jarvis-maintenance", daemon=True).start()
+        threading.Thread(target=self._keep_warm, name="jarvis-keep-warm", daemon=True).start()
         self._ensure_briefing_job()
         if voice and self.config.get("voice.enabled", True):
             threading.Thread(target=self._start_voice, name="jarvis-voice-init", daemon=True).start()
@@ -232,10 +245,36 @@ class Jarvis:
                 self.agent.resume(row["id"])
                 self.say(f"Resuming: {row['goal'][:80]}")
                 return
-        if _ACTION.match(text) or _SCREENISH.search(text):
+        quick = self._quick_answer(text)
+        if quick:
+            self.history.append({"role": "assistant", "content": quick})
+            self.say(quick, speak=source == "voice")
+            return
+        if _ACTION.match(text) or _SCREENISH.search(text) or (len(text.split()) <= 16 and
+                                                               _ACTION_ANYWHERE.search(text)):
             self._start_task(text, source)
             return
         self._chat(text, source)
+
+    @staticmethod
+    def _quick_answer(text: str) -> str:
+        """Instant replies that need no model (time / date)."""
+        t = text.lower().strip(" ?.!")
+        if re.fullmatch(r"(what('?s| is) the )?time( is it)?( now| right now)?|what time is it( now)?|time", t):
+            return time.strftime("It's %I:%M %p.").replace(" 0", " ")
+        if re.fullmatch(r"(what('?s| is) )?(today'?s |the )?(date|day)( today)?|what day is (it|today)", t):
+            return time.strftime("It's %A, %d %B %Y.")
+        return ""
+
+    def _keep_warm(self) -> None:
+        """Low RAM makes Windows page out an idle model; a tiny request every few minutes keeps replies fast."""
+        while not self._stopping.wait(240):
+            if self.busy() or (self.voice is not None and self.voice.speaker.speaking):
+                continue
+            try:
+                self.router.chat("chat", [{"role": "user", "content": "ok"}], max_tokens=1)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _start_task(self, goal: str, source: str) -> None:
         if source == "voice":
@@ -258,8 +297,9 @@ class Jarvis:
         if self.config.get("screen.observe") == "continuous" and self.screen.context.ts:
             screen = self.screen.context.summary(800)
         system = "\n\n".join(filter(None, [
-            prompts.identity(cfg), prompts.environment_block(self.db.kv_get("last_project")), prompts.CHAT_RULES,
-            prompts.SAFETY, ("What you remember:\n" + memory) if memory else "",
+            prompts.identity(cfg), prompts.CHAT_RULES, prompts.SAFETY,  # static first: prompt-cache friendly
+            prompts.environment_block(self.db.kv_get("last_project")),
+            ("What you remember:\n" + memory) if memory else "",
             ("The user's screen right now:\n" + screen) if screen else ""]))
         messages = [{"role": "system", "content": system}] + self.history[-12:]
         buffer: list[str] = []
@@ -270,11 +310,15 @@ class Jarvis:
             buffer.append(piece)
             if decided["action"] is None:
                 head = "".join(buffer).lstrip()
+                first_sentence_done = bool(re.search(r"[.!?\n]", head[8:])) or len(head) > 160
                 if not head or (len(head) < 10 and "[[ACTION]]".startswith(head)):
                     return  # could still be the hand-off marker: hold back
-                decided["action"] = head.startswith("[[")
-                if decided["action"]:
+                if head.startswith("[[") or _CLAIM.search(head):
+                    decided["action"] = True
                     return
+                if not first_sentence_done:
+                    return  # hold until the first sentence can be checked for false claims
+                decided["action"] = False
                 piece = "".join(buffer)  # release what was held back
                 self.events.state(State.SPEAKING if speak else State.PROCESSING)
             if decided["action"]:
@@ -283,19 +327,29 @@ class Jarvis:
             if speak:
                 self.voice.speaker.feed(piece)
 
+        t0 = time.time()
         try:
             result = self.router.chat("chat", messages, on_text=on_text, cancel=self._chat_cancel, max_tokens=700,
                                       temperature=0.6)
+            log.info("chat reply in %.1fs (%s)", time.time() - t0, source)
         except NoModelAvailable as exc:
             self.say("I can't reach a language model right now. " + ("Ollama doesn't seem to be running."
                                                                       if "ollama" in str(exc).lower() else ""))
             self.events.publish("notice", text=str(exc)[:300])
             return
         reply = result.text.strip()
-        if decided["action"] or reply.startswith("[[ACTION]]"):
+        if decided["action"] or reply.startswith("[[") or _CLAIM.search(reply):
+            # The chat model tried to answer an action itself (it has no tools) - hand it to the agent.
+            if speak:
+                self.voice.speaker.stop()
+            log.info("chat reply looked like an action claim; routing to the agent: %r", reply[:120])
             self.history.pop()
             self._start_task(text, source)
             return
+        if decided["action"] is None and reply:  # short reply that never reached the release point
+            self.events.publish("assistant.delta", text=reply)
+            if speak:
+                self.voice.speaker.feed(reply)
         if speak:
             self.voice.speaker.flush()
         self.history.append({"role": "assistant", "content": reply})
@@ -322,14 +376,16 @@ class Jarvis:
         source = d.get("source", "")
         result = d.get("result", "")
         status = d.get("status")
-        prefix = {"completed_unverified": "(not independently verified) ", "failed": "I couldn't finish that. ",
+        prefix = {"completed_unverified": "⚠ Not verified: ", "failed": "I couldn't finish that. ",
                   "cancelled": ""}.get(status, "")
         if source.startswith("conversation"):
             self.history.append({"role": "assistant", "content": result})
             self.memory.add_message(self.session, "assistant", result, {"task": d.get("task_id"), "status": status})
             self.events.publish("assistant.message", text=prefix + result, final=True, task_id=d.get("task_id"))
             if source.endswith("voice") and self.voice is not None and status != "cancelled":
-                self.voice.say(("I couldn't finish that. " if status == "failed" else "") + spoken_summary(result))
+                lead = {"failed": "I couldn't finish that. ",
+                        "completed_unverified": "I tried, but I couldn't confirm it worked. "}.get(status, "")
+                self.voice.say(lead + spoken_summary(result))
         elif source.startswith("schedule") and status == "failed":
             self.notify("Scheduled task failed", f"{d.get('goal', '')[:80]}: {result[:200]}")
 
