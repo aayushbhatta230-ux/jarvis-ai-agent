@@ -112,3 +112,7 @@ config/ngrok_domain.txt
 *_payload.json
 query_db.js
 
+
+# JARVIS v4 runtime data (database, models, logs, backups)
+data/
+

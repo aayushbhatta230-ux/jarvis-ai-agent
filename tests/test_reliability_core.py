@@ -20,6 +20,7 @@ def _fake_ocr(elements):
 
 # --- Startup / imports / capability registry ------------------------- #
 def test_startup_imports_cleanly():
+    import legacy_main  # noqa: F401
     import main  # noqa: F401
     import core.brain  # noqa: F401
     import core.conversation  # noqa: F401
