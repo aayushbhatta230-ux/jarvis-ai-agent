@@ -918,6 +918,7 @@ class SettingsPanel(QScrollArea):
         if self.briefing.isChecked():
             self.app._ensure_briefing_job()
         self._refresh_models()
-        restart = " Wake-word changes apply after restart." if self.wake.isChecked() != bool(
-            v and v.wake is not None) and v is not None else ""
-        self.saved.setText("Saved " + time.strftime("%H:%M:%S") + "." + restart + (" " + "; ".join(msgs) if msgs else ""))
+        self.saved.setText("Saved " + time.strftime("%H:%M:%S") + "." + (" " + "; ".join(msgs) if msgs else ""))
+        if v is not None:
+            v._go_passive()
+            v._publish_status()

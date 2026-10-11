@@ -228,7 +228,7 @@ def test_rejected_speaker_never_reaches_assistant(app):
             return Verification(0.1, False, True, "me")
 
     class STT:
-        def transcribe(self, audio):
+        def transcribe(self, audio, **kw):
             return "delete everything", 0.9, "fake"
 
     vm.recognizer, vm.stt = Rec(), STT()
@@ -252,6 +252,7 @@ def test_wake_word_matching_tolerates_mishearings():
     for heard in ("Hey Jarvis", "We're service, what time is it?", "hey jervis open chrome", "Hi Javis."):
         assert has_wake_word(heard), heard
     assert not has_wake_word("what's the weather like today")
+    assert not has_wake_word("his service was good")
     assert strip_wake_word("We're service, what time is it?") == "what time is it?"
 
 
@@ -266,7 +267,7 @@ def test_borderline_wake_is_confirmed_by_speech_recognition(app):
         def __init__(self, text):
             self.text = text
 
-        def transcribe(self, audio):
+        def transcribe(self, audio, **kw):
             return self.text, 0.8, "fake"
 
     vm.stt = STT("Hey Jarvis, what time is it?")

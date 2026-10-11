@@ -60,7 +60,7 @@ class VoiceManager:
             rate_pct=int(self.cfg.get("voice.tts_rate", 0)), volume_pct=int(self.cfg.get("voice.tts_volume", 100)),
             on_level=lambda lv: self._level("tts", lv), on_state=self._tts_state)
         self.vad = load_vad(models)
-        self.wake = load_wakeword(models) if self.cfg.get("voice.wake_word", True) else None
+        self.wake = load_wakeword(models)  # loaded even when off, so the setting can change live
         self.stt = STT(models, self.cfg.get("voice.stt_backend", "whisper"), self.cfg.get("voice.stt_model", "base.en"))
         try:
             self.recognizer: SpeakerRecognizer | None = SpeakerRecognizer(models)
@@ -158,7 +158,7 @@ class VoiceManager:
             "output": self.output_device.name if self.output_device else None,
             "mic_open": self.mic.active,
             "mic_error": self.mic.error,
-            "wake_word": self.wake is not None,
+            "wake_word": self._wake_enabled(),
             "mode": self.mode,
             "stt": self.stt.primary,
             "tts": self.speaker.last_engine or ("edge" if self.speaker.primary else "sapi"),
@@ -197,8 +197,10 @@ class VoiceManager:
         self.app.events.state(State.LISTENING, "listening")
 
     def _go_passive(self) -> None:
-        if not self.wake:
-            return  # continuous mode (no wake word): always listening
+        if not self._wake_enabled():
+            self.mode = self.ACTIVE  # always-listening mode: no wake word needed
+            self._active_deadline = float("inf")
+            return
         self.mode = self.PASSIVE
         self._reset_segment()
         if not self.speaker.speaking and not self.app.busy():
@@ -251,11 +253,13 @@ class VoiceManager:
 
     def _handle(self, frame: np.ndarray) -> None:
         self._recent.append(frame)
+        if self.mode == self.PASSIVE and not self._wake_enabled():
+            self._go_passive()  # switched to always-listening at runtime
         speaking = self.speaker.speaking
         prob = self.vad(frame)
 
         # Wake word (also allows interrupting JARVIS by saying "Hey JARVIS")
-        if self.wake is not None and (self.mode == self.PASSIVE or speaking):
+        if self._wake_enabled() and (self.mode == self.PASSIVE or speaking):
             score = self.wake.process(frame)
             if self.mode == self.PASSIVE and not speaking:
                 self._track_passive(frame, prob, score)
@@ -314,13 +318,11 @@ class VoiceManager:
         self._passive_best = max(self._passive_best, score)
         too_long = len(self._passive_audio) * FRAME_S > 12
         if self._passive_speech and (self._passive_quiet > 18 or too_long):
-            confirm = float(self.cfg.get("voice.wake_confirm_threshold", 0.08))
-            if self._passive_speech > 8 and self._passive_best >= confirm:
-                log.info("possible wake word (score %.2f) - confirming with speech recognition", self._passive_best)
+            seconds = self._passive_speech * FRAME_S
+            if self._passive_speech > 8 and seconds <= 9:
+                log.info("phrase heard (%.1fs, wake score %.2f) - checking for the wake word", seconds,
+                         self._passive_best)
                 self._jobs.put((np.concatenate(self._passive_audio), "wake_check"))
-            elif self._passive_speech > 8:
-                log.info("speech heard without wake word: %.1fs, best wake score %.2f",
-                         self._passive_speech * FRAME_S, self._passive_best)
             self._passive_speech = self._passive_quiet = 0
             self._passive_best = 0.0
             self._passive_audio = []
@@ -337,7 +339,7 @@ class VoiceManager:
                     self.app.events.state(State.LISTENING, "hearing you")
             else:
                 self._voiced = 0
-                if self.wake and self.mode == self.ACTIVE and time.time() > self._active_deadline:
+                if self._wake_enabled() and self.mode == self.ACTIVE and time.time() > self._active_deadline:
                     self._go_passive()
             return
         self._speech.append(frame)
@@ -355,7 +357,7 @@ class VoiceManager:
                 return
             self._jobs.put((audio, "utterance"))
             self.app.events.state(State.PROCESSING, "transcribing")
-            if self.wake:
+            if self._wake_enabled():
                 self.mode = self.PASSIVE  # follow_up() re-opens after the reply
 
     def _gate(self, audio: np.ndarray, what: str) -> bool:
@@ -392,7 +394,8 @@ class VoiceManager:
     def _confirm_wake(self, audio: np.ndarray) -> None:
         if self.mode != self.PASSIVE:
             return  # already woken by the instant path
-        text, conf, engine = self.stt.transcribe(audio)
+        self._save_clip(audio, "phrase")
+        text, conf, engine = self.stt.transcribe(audio, prompt="Hey JARVIS.", hotwords="JARVIS")
         if not has_wake_word(text):
             log.info("not the wake word: %r", text)
             return
@@ -410,7 +413,31 @@ class VoiceManager:
             self._reset_segment()
             self._go_active(8.0)
 
+    def _save_clip(self, audio: np.ndarray, tag: str) -> None:
+        """Keep the last few phrases as WAV files (data/debug/voice) for tuning recognition. Local only."""
+        if not self.cfg.get("voice.save_debug_clips", True):
+            return
+        try:
+            import wave
+
+            folder = paths.sub("debug") / "voice"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{time.strftime('%H%M%S')}_{tag}.wav"
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(16000)
+                w.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+            for old in sorted(folder.glob("*.wav"))[:-40]:
+                old.unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001 - debugging aid only
+            log.debug("could not save voice clip", exc_info=True)
+
+    def _wake_enabled(self) -> bool:
+        return self.wake is not None and bool(self.cfg.get("voice.wake_word", True))
+
     def _process(self, audio: np.ndarray) -> None:
+        self._save_clip(audio, "command")
         mode = self.cfg.get("voice.speaker_id.mode", "enforce")
         verification = Verification(0.0, True, False)
         if self.recognizer is not None and self.recognizer.enrolled and mode != "off":
