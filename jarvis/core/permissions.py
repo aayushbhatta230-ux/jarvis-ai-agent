@@ -87,7 +87,7 @@ class PermissionManager:
 
     def allowed_roots(self) -> list[Path]:
         roots = self.config.get("permissions.allowed_roots", ["~"]) or ["~"]
-        return [Path(r).expanduser().resolve() for r in roots]
+        return [Path(r).expanduser().resolve() for r in roots if r != "*"]
 
     def check_path(self, path: str | Path, write: bool = False) -> Path:
         """Resolve ``path`` and ensure it lies inside a configured root for writes.
@@ -97,6 +97,16 @@ class PermissionManager:
         """
         resolved = Path(path).expanduser().resolve()
         if not write:
+            return resolved
+        if "*" in (self.config.get("permissions.allowed_roots", []) or []):
+            # Full access, except the operating system's own folders and bare drive roots.
+            import os
+
+            protected = [Path(os.environ.get(v, d)).resolve() for v, d in (
+                ("SystemRoot", r"C:\Windows"), ("ProgramFiles", r"C:\Program Files"),
+                ("ProgramFiles(x86)", r"C:\Program Files (x86)"), ("ProgramData", r"C:\ProgramData"))]
+            if resolved == Path(resolved.anchor) or any(resolved == p or p in resolved.parents for p in protected):
+                raise PermissionDenied(f"{resolved} is a protected system location")
             return resolved
         for root in self.allowed_roots():
             if resolved == root or root in resolved.parents:

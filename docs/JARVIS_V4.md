@@ -197,3 +197,19 @@ model → memory → tool → shutdown smoke test.
 * Bluetooth headsets switch to hands-free (16 kHz) audio while the microphone is open; that's a Bluetooth limit.
 * Wake-word detection uses the generic openWakeWord "hey jarvis" model; enrolment improves who it responds to,
   not how it hears the wake word.
+
+## 9. Fast free cloud models, screen sharing, email & messaging (update)
+
+* **Speed:** add a free key in Settings → AI models. **Groq** (console.groq.com/keys) makes chat and the agent
+  answer in ~1 s; **Gemini** (aistudio.google.com/apikey) adds fast vision for screen sharing. Without keys JARVIS
+  uses the local models (chat ~1-2 s warm, screen questions ~5 s).
+* **Live screen sharing:** say "share my screen" (or the *Share screen* button in the Live screen panel). JARVIS
+  watches the screen (OCR on change, every 1.5 s) and answers questions about it in one step; "stop sharing" ends it.
+* **Interruptions:** a cough, "hmm", "okay" or "go on" while JARVIS talks pauses and then resumes the reply;
+  a real new request replaces it. Over loudspeakers only "Hey JARVIS" interrupts.
+* **Email:** "email Ram that I'll be late" - JARVIS writes it, shows/reads the full email, sends after you say
+  yes, and confirms it reached your Sent folder. Needs a Gmail **app password** in Settings.
+* **Instagram:** "go to Instagram and text Aayush a sorry note" - JARVIS writes the message, asks you to approve
+  the exact text, sends it through your logged-in browser and confirms it appears in the chat.
+* **File access:** `permissions.allowed_roots = ["*"]` lets JARVIS write anywhere except Windows/Program Files;
+  deleting still goes to the Recycle Bin and asks first.

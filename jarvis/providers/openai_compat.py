@@ -50,6 +50,13 @@ class OpenAICompatProvider(Provider):
             headers["Authorization"] = f"Bearer {key}"
         return headers
 
+    def has_model(self, model: str) -> bool:
+        try:
+            names = self.list_models()
+        except Exception:  # noqa: BLE001 - listing not supported: assume configured model exists
+            return True
+        return not names or model in names
+
     def available(self) -> tuple[bool, str]:
         if self.settings.get("secret") and not self._key():
             return False, f"no API key (store secret {self.settings['secret']})"
@@ -67,7 +74,7 @@ class OpenAICompatProvider(Provider):
         if r.status_code in (401, 403):
             raise ProviderError("authentication failed", retryable=False)
         r.raise_for_status()
-        names = [m.get("id", "") for m in r.json().get("data", [])]
+        names = [str(m.get("id", "")).removeprefix("models/") for m in r.json().get("data", [])]
         self._models = (time.time(), names)
         return names
 
@@ -116,7 +123,7 @@ class OpenAICompatProvider(Provider):
             "model": model,
             "messages": self._convert(messages),
             "stream": True,
-            "max_completion_tokens": max_tokens,
+            self.settings.get("max_tokens_field", "max_completion_tokens"): max_tokens,
         }
         if self.settings.get("send_temperature", False):
             body["temperature"] = temperature

@@ -51,6 +51,8 @@ GROUP_KEYWORDS: dict[str, tuple[str, ...]] = {
                  "compare", "sources", "summari", "report", "latest", "price"),
     "productivity": ("remind", "schedule", "todo", "to-do", "to do", "deadline", "focus", "pomodoro", "briefing",
                      "every day", "daily", "draft", "note", "plan", "agenda", "unfinished", "next step"),
+    "comms": ("email", "e-mail", "mail", "inbox", "instagram", "insta", "dm", "message", "text ", "send",
+              "reply to", "sorry note", "whatsapp"),
     "memory": ("remember", "forget", "recall", "preference", "last time", "previous", "history"),
     "system": ("cpu", "ram", "memory usage", "gpu", "vram", "disk", "battery", "diagnos", "self test", "self-test",
                "performance", "event log", "health", "notify", "slow"),
@@ -64,6 +66,8 @@ def select_groups(goal: str) -> set[str]:
     groups = {name for name, kws in GROUP_KEYWORDS.items() if any(k in g for k in kws)}
     if "code" in groups:
         groups |= {"files", "shell"}
+    if "comms" in groups:
+        groups |= {"screen", "desktop", "memory"}
     if "screen" in groups or "desktop" in groups:
         groups |= {"screen", "desktop"}
     return groups or {"files", "desktop", "screen"}
@@ -218,6 +222,7 @@ class AgentEngine:
             screen = self.app.screen.context.summary(1200)
         system = "\n\n".join(filter(None, [
             prompts.identity(cfg),
+            prompts.VOICE_INTERPRETATION,
             prompts.AGENT_METHOD,
             prompts.SAFETY,
             prompts.environment_block(self.db.kv_get("last_project")),

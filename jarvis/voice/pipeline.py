@@ -46,6 +46,18 @@ ENROLL_PHRASES = [
 ]
 
 
+_BACKCHANNEL_WORD = (
+    r"(ok(ay)?|yeah|yes|yep|ya|haan|ha|hmm+|mm+|uh+( huh)?|um+|ah+|oh|right|sure|nice|cool|wow|sorry|"
+    r"go on|go ahead|continue|carry on|keep going|why (did )?you stop|i'?m listening|nothing|never ?mind)")
+_BACKCHANNEL = re.compile(r"(?i)^\s*" + _BACKCHANNEL_WORD + r"([\s.!?,]+" + _BACKCHANNEL_WORD + r")*[\s.!?,]*$")
+
+
+def is_backchannel(text: str) -> bool:
+    """Short reactions that shouldn't cancel what JARVIS is saying."""
+    t = (text or "").strip()
+    return not t or bool(_BACKCHANNEL.match(t))
+
+
 class VoiceManager:
     PASSIVE, ACTIVE = "passive", "active"
 
@@ -85,6 +97,7 @@ class VoiceManager:
         self._recent: deque[np.ndarray] = deque(maxlen=60)  # ~2 s for wake-word speaker check
         self._wake_refractory = 0.0
         self._barge_frames = 0
+        self._interrupted = False  # a reply was paused by barge-in and may be resumed
         self._passive_speech = 0  # frames of speech heard while waiting for the wake word
         self._passive_quiet = 0
         self._passive_best = 0.0
@@ -286,18 +299,24 @@ class VoiceManager:
                 return
 
         # Barge-in: user starts talking over JARVIS (headset => no speaker echo)
-        if speaking and self.cfg.get("voice.barge_in", True):
-            self._barge_frames = self._barge_frames + 1 if prob > 0.6 else max(0, self._barge_frames - 1)
-            if self._barge_frames >= 8:  # ~250 ms of speech
-                audio = np.concatenate(list(self._recent)[-12:])
+        # Over loudspeakers JARVIS would hear itself, so only the wake word may interrupt there.
+        out_is_headset = bool(self.output_device and devices.is_headset(self.output_device.name))
+        if speaking and self.cfg.get("voice.barge_in", True) and out_is_headset:
+            self._barge_frames = self._barge_frames + 1 if prob > 0.6 else max(0, self._barge_frames - 2)
+            need = int(float(self.cfg.get("voice.barge_in_seconds", 0.6)) / FRAME_S)
+            if self._barge_frames >= need:  # sustained speech, not a cough or a click
+                audio = np.concatenate(list(self._recent)[-(need + 4):])
                 self._barge_frames = 0
                 if self._gate(audio, "barge-in"):
-                    self.interrupt()
+                    log.info("barge-in: pausing reply to listen")
+                    self.speaker.pause_for_interrupt()
+                    self._interrupted = True
+                    self.app.events.publish("voice.interrupted", soft=True)
                     self._go_active(8.0)
                     self._in_speech = True
-                    self._speech = list(self._recent)[-12:]
+                    self._speech = list(self._recent)[-(need + 4):]
                     self._silence = 0
-                    self._voiced = 8
+                    self._voiced = need
             return
 
         if self.mode == self.PASSIVE and self._enroll_sink is None:
@@ -362,6 +381,9 @@ class VoiceManager:
             self._reset_segment()
             self._preroll.clear()
             if voiced_s < 0.35:
+                if self._interrupted:  # a cough or click paused the reply: carry on
+                    self._interrupted = False
+                    self.speaker.resume_after_interrupt()
                 return
             if self._enroll_sink is not None:
                 self._enroll_sink.put(audio)
@@ -461,6 +483,9 @@ class VoiceManager:
                                     accepted=verification.accepted, label=verification.label(),
                                     ms=int((time.time() - t) * 1000))
             if not verification.accepted and mode == "enforce":
+                if self._interrupted:  # someone else talked over JARVIS: carry on
+                    self._interrupted = False
+                    self.speaker.resume_after_interrupt()
                 self.app.events.publish("voice.rejected", score=round(verification.score, 3))
                 self._go_passive()
                 if not self.wake:
@@ -470,6 +495,15 @@ class VoiceManager:
         text, conf, engine = self.stt.transcribe(audio)
         log.info("heard %.1fs via %s in %.1fs: %r", audio.shape[0] / 16000, engine, time.time() - t, text)
         text = strip_wake_word(text, self.wake_aliases)
+        if self._interrupted:
+            self._interrupted = False
+            if is_backchannel(text):
+                log.info("small interruption (%r) - resuming the reply", text)
+                if self.speaker.resume_after_interrupt():
+                    self.app.events.publish("voice.resumed", heard=text)
+                    return
+            else:
+                self.speaker.discard_resume()
         self.app.events.publish("voice.transcript", text=text, confidence=round(conf, 2), engine=engine,
                                 speaker=verification.label())
         if not text:

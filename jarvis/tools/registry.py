@@ -158,6 +158,7 @@ class ToolRegistry:
         # Importing the modules runs their @tool declarations.
         from jarvis.tools import (  # noqa: F401
             code,
+            communication,
             desktop,
             files,
             memory_tools,

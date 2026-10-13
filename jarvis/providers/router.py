@@ -116,6 +116,8 @@ class ModelRouter:
         try:
             if isinstance(prov, OllamaProvider) and not prov.has_model(cand.model):
                 return False, f"model not installed (ollama pull {cand.model})"
+            if hasattr(prov, "has_model") and not isinstance(prov, OllamaProvider) and not prov.has_model(cand.model):
+                return False, "model not offered by this provider"
             caps = prov.capabilities(cand.model)
         except ModelUnavailable as exc:
             return False, str(exc)

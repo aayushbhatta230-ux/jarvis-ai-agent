@@ -710,6 +710,20 @@ class SettingsPanel(QScrollArea):
         f3.addRow("", self.openai_on)
         f3.addRow("OpenAI base URL", self.openai_url)
         f3.addRow("OpenAI key", self.openai_key)
+        # Free, fast cloud models + email credentials, all stored in Windows Credential Manager
+        self.secret_fields: dict[str, QLineEdit] = {}
+        for secret, label, hint in (
+            ("GROQ_API_KEY", "Groq key (free, fastest)", "gsk_… from console.groq.com/keys"),
+            ("GEMINI_API_KEY", "Gemini key (free, vision)", "AIza… from aistudio.google.com/apikey"),
+            ("JARVIS_GMAIL_ADDRESS", "Gmail address", "you@gmail.com (for sending/reading email)"),
+            ("JARVIS_GMAIL_APP_PASSWORD", "Gmail app password", "16 letters from myaccount.google.com/apppasswords"),
+        ):
+            edit = QLineEdit()
+            if "ADDRESS" not in secret:
+                edit.setEchoMode(QLineEdit.EchoMode.Password)
+            edit.setPlaceholderText("stored ✓" if secrets.has(secret) else hint)
+            self.secret_fields[secret] = edit
+            f3.addRow(label, edit)
         lay.addLayout(f3)
         row = QHBoxLayout()
         row.addWidget(button("Check models", self._refresh_models))
@@ -938,6 +952,11 @@ class SettingsPanel(QScrollArea):
                 secrets.set("OPENAI_API_KEY", self.openai_key.text().strip())
                 self.openai_key.clear()
                 self.openai_key.setPlaceholderText("stored")
+            for secret, edit in self.secret_fields.items():
+                if edit.text().strip():
+                    secrets.set(secret, edit.text().strip())
+                    edit.clear()
+                    edit.setPlaceholderText("stored ✓")
         except Exception as exc:  # noqa: BLE001
             msgs.append(f"could not store key: {exc}")
         self.app.router.reload()

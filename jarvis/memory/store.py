@@ -154,11 +154,11 @@ class MemoryStore:
         return [(r["id"], 0.5) for r in rows]
 
     def search(self, query: str, k: int = 8, kinds: list[str] | None = None, project: str = "",
-               min_score: float = 0.25) -> list[dict[str, Any]]:
+               min_score: float = 0.25, semantic: bool = True) -> list[dict[str, Any]]:
         scores: dict[int, float] = {}
         for mid, s in self._keyword_search(query, 30):
             scores[mid] = scores.get(mid, 0) + 0.45 * s
-        emb = self._embed([query])
+        emb = self._embed([query]) if semantic else None
         if emb:
             for mid, s in self._vector_search(emb[1][0], 30):
                 scores[mid] = scores.get(mid, 0) + 0.75 * max(0.0, s)
@@ -193,13 +193,13 @@ class MemoryStore:
         return self.db.query("SELECT id, kind, content FROM memories WHERE kind IN ('preference','goal','routine') "
                              "AND importance >= 0.7 ORDER BY importance DESC, updated DESC LIMIT 8")
 
-    def context_block(self, query: str, project: str = "") -> str:
+    def context_block(self, query: str, project: str = "", fast: bool = False) -> str:
         seen: set[int] = set()
         lines = []
         for r in self.core_profile():
             seen.add(r["id"])
             lines.append(f"- [{r['kind']}] {r['content']}")
-        for r in self.search(query, k=7, project=project):
+        for r in self.search(query, k=7, project=project, min_score=0.2 if fast else 0.25, semantic=not fast):
             if r["id"] in seen:
                 continue
             lines.append(f"- [{r['kind']}{'/' + Path(r['project']).name if r['project'] else ''}] {r['content']}")

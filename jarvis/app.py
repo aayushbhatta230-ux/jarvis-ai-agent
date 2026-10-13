@@ -48,13 +48,18 @@ _ACTION_ANYWHERE = re.compile(
     r"(?i)\b(open|close|launch|start|quit|exit|kill|play|pause|resume|skip|mute|unmute|turn (on|off|up|down)"
     r"|volume|create|make|write|save|delete|remove|move|rename|copy|find|search|download|install|run|fix|build"
     r"|commit|push|remind|schedule|type|click|press|scroll|minimi[sz]e|maximi[sz]e|lock|shut ?down|restart"
-    r"|screenshot|my screen|on screen|switch to|go to|send|email|organi[sz]e|clean up|check)\b")
+    r"|screenshot|my screen|on screen|switch to|go to|send|email|e-mail|mail|inbox|text|message|dm|instagram"
+    r"|whatsapp|reply|organi[sz]e|clean up|check)\b")
 # A chat reply must never claim to have done something: only the agent's verified tools can do that.
 _CLAIM = re.compile(
     r"(?i)\[\[|\b(i('ve| have)? (just )?(opened|closed|launched|started|created|deleted|removed|moved|saved|sent"
     r"|played|paused|muted|set|turned|installed|ran|typed|clicked)|(is|are) now (open|closed|running|playing|muted"
     r"|paused|off|on)|i('ll| will) (now |go ahead and )?(open|close|launch|start|create|delete|play|pause|turn|set"
     r"|install|run|type|click))\b")
+_SHARE_ON = re.compile(r"(?i)\b((start|begin|turn on|enable|start the) (screen ?shar\w*|sharing( my)? screen)"
+                       r"|share (my|the) screen|watch my screen|look at my screen live|go live on my screen)\b")
+_SHARE_OFF = re.compile(r"(?i)\b((stop|end|turn off|disable|quit) (the )?(screen ?shar\w*|sharing|watching( my)? "
+                        r"screen)|stop looking at my screen)\b")
 _STOP = re.compile(r"(?i)^\s*(stop|cancel|abort|never ?mind|shut up|be quiet|quiet|that'?s enough|enough)\W*$")
 _YES = re.compile(r"(?i)^\s*(yes|yeah|yep|sure|go ahead|do it|approve|approved|confirm|ok(ay)?|affirmative)\b")
 _NO = re.compile(r"(?i)^\s*(no|nope|don'?t|do not|deny|denied|cancel|stop|negative)\b")
@@ -250,6 +255,18 @@ class Jarvis:
             self.history.append({"role": "assistant", "content": quick})
             self.say(quick, speak=source == "voice")
             return
+        share = _SHARE_ON.search(text), _SHARE_OFF.search(text)
+        if share[1] or share[0]:
+            on = not share[1]
+            self.screen.set_sharing(on)
+            reply = ("I can see your screen now. Ask me anything about it." if on
+                     else "Okay, I've stopped watching your screen.")
+            self.history.append({"role": "assistant", "content": reply})
+            self.say(reply, speak=source == "voice")
+            return
+        if self._is_screen_question(text):
+            self._screen_chat(text, source)
+            return
         if _ACTION.match(text) or _SCREENISH.search(text) or (len(text.split()) <= 16 and
                                                                _ACTION_ANYWHERE.search(text)):
             self._start_task(text, source)
@@ -259,7 +276,8 @@ class Jarvis:
     @staticmethod
     def _quick_answer(text: str) -> str:
         """Instant replies that need no model (time / date)."""
-        t = text.lower().strip(" ?.!")
+        t = re.sub(r"\b(hey|hi|ok|jarvis|please|can you tell me|tell me)\b[,]?", " ", text.lower())
+        t = re.sub(r"\s+", " ", t).strip(" ?.!,")
         if re.fullmatch(r"(what('?s| is) the )?time( is it)?( now| right now)?|what time is it( now)?|time", t):
             return time.strftime("It's %I:%M %p.").replace(" 0", " ")
         if re.fullmatch(r"(what('?s| is) )?(today'?s |the )?(date|day)( today)?|what day is (it|today)", t):
@@ -288,20 +306,58 @@ class Jarvis:
 
         return random.choice(["On it.", "Right away.", "Working on it.", "Give me a moment.", "Certainly."])
 
-    def _chat(self, text: str, source: str) -> None:
+    def _is_screen_question(self, text: str) -> bool:
+        """'What's on my screen?', 'explain this error' - questions answered by looking, not by doing."""
+        t = text.lower()
+        if not (_SCREENISH.search(t) or re.search(r"\b(screen|monitor)\b|\bthis (error|code|window|page|message)\b",
+                                                  t)):
+            return False
+        rest = re.sub(r"\b(my screen|on screen|the screen|screen|monitor|check|read|look|see|explain|tell me|show)\b",
+                      " ", t)
+        return not _ACTION_ANYWHERE.search(rest)
+
+    def _screen_chat(self, text: str, source: str) -> None:
+        """Answer about the screen in ONE model call: a fresh frame + OCR (vision model if a fast one exists)."""
+        self.events.state(State.SCREEN, "looking at your screen")
+        img, ocr = self.screen.latest_frame(max_age=2.0 if self.screen.sharing else 0.0)
+        images: list[str] = []
+        role = "chat"
+        try:
+            cand = self.router.resolve("vision")
+            local_vision = self.router.providers[cand.provider].type == "ollama"
+            # A local vision model must swap in (10-60 s on this laptop); with OCR the chat model answers in ~2 s.
+            if not local_vision or re.search(r"(?i)\b(look like|colou?r|picture|image|photo|video|design|layout)\b",
+                                             text):
+                from jarvis.services.screen import to_b64_png
+
+                images, role = [to_b64_png(img, 1280)], "vision"
+        except NoModelAvailable:
+            pass
+        context = ("[What's on the user's screen right now - OCR text, may contain recognition errors]\n"
+                   + (re.sub(r"\n\s*\n+", "\n", ocr).strip()[:2500] or "(no readable text)"))
+        self._chat(text, source, role=role, images=images, extra=prompts.SCREEN_RULES + "\n\n" + context)
+
+    def _chat(self, text: str, source: str, role: str = "chat", images: list[str] | None = None,
+              extra: str = "") -> None:
         self._chat_cancel = CancelToken()
         self.events.state(State.PROCESSING, "thinking")
         cfg = self.config.snapshot()
-        memory = self.memory.context_block(text)
+        memory = self.memory.context_block(text, fast=True)  # keyword-only: no embedding round-trip
         screen = ""
-        if self.config.get("screen.observe") == "continuous" and self.screen.context.ts:
+        if not extra and self.screen.sharing:
+            _img, ocr = self.screen.latest_frame(max_age=5.0)
+            screen = f"Active window: {self.screen.context.window_title}\n{ocr.strip()[:2000]}"
+        elif self.config.get("screen.observe") == "continuous" and self.screen.context.ts:
             screen = self.screen.context.summary(800)
         system = "\n\n".join(filter(None, [
-            prompts.identity(cfg), prompts.CHAT_RULES, prompts.SAFETY,  # static first: prompt-cache friendly
+            prompts.identity(cfg), prompts.VOICE_INTERPRETATION, prompts.CHAT_RULES, prompts.SAFETY,  # static first
             prompts.environment_block(self.db.kv_get("last_project")),
             ("What you remember:\n" + memory) if memory else "",
-            ("The user's screen right now:\n" + screen) if screen else ""]))
+            ("The user is sharing their screen with you. Right now it shows:\n" + screen) if screen else "",
+            extra]))
         messages = [{"role": "system", "content": system}] + self.history[-12:]
+        if images:
+            messages[-1] = {**messages[-1], "images": images}
         buffer: list[str] = []
         decided = {"action": None}
         speak = source == "voice" and self.voice is not None
@@ -329,7 +385,7 @@ class Jarvis:
 
         t0 = time.time()
         try:
-            result = self.router.chat("chat", messages, on_text=on_text, cancel=self._chat_cancel, max_tokens=700,
+            result = self.router.chat(role, messages, on_text=on_text, cancel=self._chat_cancel, max_tokens=700,
                                       temperature=0.6)
             log.info("chat reply in %.1fs (%s)", time.time() - t0, source)
         except NoModelAvailable as exc:

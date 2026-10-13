@@ -336,8 +336,23 @@ class HoloDashboard(QWidget):
         shortcuts.body.addLayout(srow)
         right = QVBoxLayout()
         right.setSpacing(12)
+        live = GlassPanel("Live screen", theme.GREEN)
+        lrow = QHBoxLayout()
+        self.screen_preview = QLabel("Not sharing.\nSay “share my screen”.")
+        self.screen_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.screen_preview.setMinimumSize(170, 96)
+        self.screen_preview.setStyleSheet(f"color: {theme.DIM}; font-size: 11px; background: rgba(3,8,14,160);"
+                                          " border-radius: 8px;")
+        lrow.addWidget(self.screen_preview, 1)
+        self.share_btn = QPushButton("Share screen")
+        self.share_btn.setCheckable(True)
+        self.share_btn.setChecked(self.app.screen.sharing)
+        self.share_btn.toggled.connect(self._toggle_share)
+        lrow.addWidget(self.share_btn, 0, Qt.AlignmentFlag.AlignTop)
+        live.body.addLayout(lrow)
         right.addWidget(chat_panel, 5)
-        right.addWidget(task_panel, 3)
+        right.addWidget(task_panel, 2)
+        right.addWidget(live, 2)
         right.addWidget(shortcuts, 0)
         grid.addLayout(right, 0, 2)
 
@@ -547,6 +562,24 @@ class HoloDashboard(QWidget):
         elif t in ("notify", "screen.alert"):
             self._event_line(f"{d.get('title', d.get('window', ''))}: {d.get('message', ' '.join(d.get('lines', [])))[:90]}",
                              theme.AMBER)
+        elif t == "screen.frame":
+            from PySide6.QtGui import QPixmap
+
+            pm = QPixmap()
+            if pm.loadFromData(d["jpeg"], "JPEG"):
+                self.screen_preview.setPixmap(pm.scaled(self.screen_preview.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                        Qt.TransformationMode.SmoothTransformation))
+        elif t == "screen.sharing":
+            self.share_btn.blockSignals(True)
+            self.share_btn.setChecked(d["on"])
+            self.share_btn.setText("Stop sharing" if d["on"] else "Share screen")
+            self.share_btn.blockSignals(False)
+            if not d["on"]:
+                self.screen_preview.clear()
+                self.screen_preview.setText("Not sharing.\nSay “share my screen”.")
+            self._event_line("screen sharing " + ("on - I can see your screen" if d["on"] else "off"), theme.GREEN)
+        elif t == "voice.resumed":
+            self._event_line(f"small interruption (“{d.get('heard') or '…'}”) - carrying on")
         elif t == "voice.enroll":
             self.chat.add_system(f"({d['step']}/{d['total']})  Say: “{d['phrase']}”")
             self.state_label.setText(f"Say “{d['phrase']}”  ({d['step']}/{d['total']})")
@@ -592,6 +625,10 @@ class HoloDashboard(QWidget):
             self.app.agent.unpause(run.id)
         else:
             self.app.agent.pause(run.id)
+
+    def _toggle_share(self, on: bool) -> None:
+        self.share_btn.setText("Stop sharing" if on else "Share screen")
+        threading.Thread(target=self.app.screen.set_sharing, args=(on,), daemon=True).start()
 
     def _mic_test(self) -> None:
         voice = self.app.voice

@@ -57,6 +57,8 @@ class Player:
         self._lock = threading.Lock()
         self._stream: sd.OutputStream | None = None
         self.idle = threading.Event()
+        self.written_total = 0  # samples queued since start
+        self.played_total = 0  # samples actually played
         self.idle.set()
 
     def open(self, device: Device | None) -> None:
@@ -87,12 +89,14 @@ class Player:
         data = resample(pcm, src_rate, self.rate) * self.volume
         with self._lock:
             self._buf.append(data)
+            self.written_total += data.shape[0]
             self.idle.clear()
 
     def stop(self) -> None:
         with self._lock:
             self._buf.clear()
             self._cur = np.zeros(0, dtype=np.float32)
+            self.written_total = self.played_total
             self.idle.set()
 
     def _callback(self, outdata: np.ndarray, frames: int, _time: object, status: sd.CallbackFlags) -> None:
@@ -108,6 +112,7 @@ class Player:
                 out[filled : filled + take] = self._cur[:take]
                 self._cur = self._cur[take:]
                 filled += take
+            self.played_total += filled
             if filled < frames and not self._buf and self._cur.size == 0:
                 self.idle.set()
         if outdata.shape[1] == 1:
@@ -227,6 +232,8 @@ class Speaker:
         self.last_engine = ""
         self._edge_failures = 0
         self._cache: dict[str, tuple[np.ndarray, int]] = {}
+        self._timeline: list[tuple[str, int]] = []  # (sentence, player sample position where it ends)
+        self._resume_texts: list[str] = []
         threading.Thread(target=self._worker, name="jarvis-tts", daemon=True).start()
         threading.Thread(target=self.precache, name="jarvis-tts-cache", daemon=True).start()
 
@@ -263,8 +270,36 @@ class Speaker:
             self._queue(self._partial)
         self._partial = ""
 
+    def pause_for_interrupt(self) -> None:
+        """Stop the audio now but remember what was left, so a small interruption can resume it."""
+        played = self.player.played_total
+        remaining = [t for t, end in self._timeline if end > played]
+        queued = []
+        try:
+            while True:
+                gen, text = self._sentences.get_nowait()
+                if gen == self._gen:
+                    queued.append(text)
+        except queue.Empty:
+            pass
+        if self._partial.strip():
+            queued.append(speakable(self._partial))
+        self._resume_texts = remaining + queued
+        self.stop()
+
+    def resume_after_interrupt(self) -> bool:
+        """Continue a reply that was paused by a cough, 'hmm', 'okay'... Returns True if anything resumed."""
+        texts, self._resume_texts = self._resume_texts, []
+        for t in texts:
+            self._queue(t)
+        return bool(texts)
+
+    def discard_resume(self) -> None:
+        self._resume_texts = []
+
     def stop(self) -> None:
         self._gen += 1
+        self._timeline = []
         self._partial = ""
         try:
             while True:
@@ -334,6 +369,8 @@ class Speaker:
                 pcm, rate = self._synth(text)
                 if gen == self._gen:
                     self.player.write(pcm, rate)
+                    self._timeline.append((text, self.player.written_total))
+                    self._timeline = self._timeline[-40:]
             except Exception:  # noqa: BLE001
                 log.exception("speech synthesis failed")
             finally:

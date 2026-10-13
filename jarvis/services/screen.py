@@ -272,14 +272,58 @@ class ScreenService:
     def stop_observer(self) -> None:
         self._stop.set()
 
+    # --------------------------------------------------------- live sharing
+    @property
+    def sharing(self) -> bool:
+        return bool(self.app.config.get("screen.sharing", False))
+
+    def set_sharing(self, on: bool) -> None:
+        """Live screen sharing: JARVIS keeps watching the screen and answers questions about it instantly."""
+        self.app.config.set("screen.sharing", on)
+        if on:
+            self.start_observer()
+        self.app.events.publish("screen.sharing", on=on)
+        log.info("screen sharing %s", "on" if on else "off")
+
+    def latest_frame(self, max_age: float = 3.0) -> tuple[Image.Image, str]:
+        """Most recent full-screen frame (captured now if the cached one is stale) and its OCR text."""
+        frame = getattr(self, "_frame", None)
+        if frame is None or time.time() - frame[0] > max_age:
+            img = grab()
+            text = self.ocr(img)
+            self._frame = (time.time(), img, text)
+            frame = self._frame
+        return frame[1], frame[2]
+
+    def _share_tick(self) -> None:
+        img = grab()
+        fp = fingerprint(img)
+        changed = difference(fp, getattr(self, "_share_fp", None)) >= float(
+            self.app.config.get("screen.change_threshold", 0.02))
+        if not changed and getattr(self, "_frame", None):
+            self._frame = (time.time(), self._frame[1], self._frame[2])
+            return
+        self._share_fp = fp
+        text = self.ocr(img)  # OCR only when the picture actually changed
+        self._frame = (time.time(), img, text)
+        preview = img.copy()
+        preview.thumbnail((480, 300))
+        buf = io.BytesIO()
+        preview.save(buf, format="JPEG", quality=70)
+        self.app.events.publish("screen.frame", jpeg=buf.getvalue(), width=img.width, height=img.height)
+        self.refresh_context(force=False)
+
     def _observe(self) -> None:
         while not self._stop.is_set():
             mode = self.app.config.get("screen.observe", "on_demand")
             interval = max(1.5, float(self.app.config.get("screen.interval_seconds", 4.0)))
-            if mode == "continuous":
-                try:
+            try:
+                if self.sharing:
+                    self._share_tick()
+                    interval = 1.5
+                elif mode == "continuous":
                     self.refresh_context()
-                except Exception:  # noqa: BLE001
-                    log.exception("screen observation failed")
-                    self._stop.wait(10)
+            except Exception:  # noqa: BLE001
+                log.exception("screen observation failed")
+                self._stop.wait(10)
             self._stop.wait(interval)

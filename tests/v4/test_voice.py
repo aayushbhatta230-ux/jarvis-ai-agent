@@ -148,6 +148,8 @@ def _bare_voice_manager(app):
     vm.wake_aliases = []
     vm._tap = None
     vm._speech_end = 0.0
+    vm._interrupted = False
+    vm.output_device = None
     vm._jobs = queue.Queue()
     vm._enroll_sink = None
     vm.muted = False
@@ -194,13 +196,18 @@ def test_voice_state_transitions_wake_utterance_bargein(app):
         vm._handle(silence)
     audio, _ = vm._jobs.get_nowait()
     assert audio.shape[0] >= 30 * 512 and "processing" in states
-    # barge-in while speaking
-    stopped = []
-    vm.speaker = type("S", (), {"speaking": True, "stop": lambda self: stopped.append(1)})()
-    vm.interrupt = lambda: (stopped.append(1), setattr(vm.speaker, "speaking", False))
-    for _ in range(9):
+    # barge-in while speaking: a short noise is ignored, sustained speech pauses the reply
+    paused = []
+    vm.output_device = devices.Device(5, "Headphones (YS-511)", "Windows WASAPI", 2, 44100)
+    vm.speaker = type("S", (), {"speaking": True,
+                                "pause_for_interrupt": lambda self: (paused.append(1),
+                                                                     setattr(self, "speaking", False))})()
+    for _ in range(6):  # ~0.2 s: cough / click
         vm._handle(speech)
-    assert stopped and vm.mode == VoiceManager.ACTIVE and vm._in_speech
+    assert not paused
+    for _ in range(20):
+        vm._handle(speech)
+    assert paused and vm.mode == VoiceManager.ACTIVE and vm._in_speech and vm._interrupted
 
 
 def test_voice_gate_enforces_enrolled_speaker(app):
@@ -311,3 +318,53 @@ def test_transcript_junk_is_dropped():
     assert clean_transcript("VS Code, PowerShell, PowerShell, PowerShell, PowerShell, PowerShell") == ""
     assert clean_transcript("We'll see you in the next video.") == ""
     assert clean_transcript("can you close vs code") == "can you close vs code"
+
+
+def test_small_interruptions_resume_the_reply(app):
+    from jarvis.voice.pipeline import is_backchannel
+
+    for t in ("", "okay", "hmm", "yeah.", "go on", "why you stop go on", "sorry"):
+        assert is_backchannel(t), t
+    for t in ("stop", "open chrome", "what time is it", "wait, send it to mum instead"):
+        assert not is_backchannel(t), t
+    vm = _bare_voice_manager(app)
+    resumed, heard = [], []
+    vm.on_utterance = lambda text, v: heard.append(text)
+    vm.speaker = type("S", (), {"resume_after_interrupt": lambda self: (resumed.append(1), True)[1],
+                                "discard_resume": lambda self: resumed.append("discarded")})()
+
+    class STT:
+        def __init__(self, t):
+            self.t = t
+
+        def transcribe(self, audio, **kw):
+            return self.t, 0.9, "fake"
+
+    vm._interrupted, vm.stt = True, STT("hmm okay")
+    vm._process(np.zeros(16000, np.float32))
+    assert resumed == [1] and heard == []          # reply continues, nothing sent to the assistant
+    vm._interrupted, vm.stt = True, STT("open notepad")
+    vm._process(np.zeros(16000, np.float32))
+    assert resumed[-1] == "discarded" and heard == ["open notepad"]
+
+
+def test_speaker_pause_and_resume_keeps_unspoken_sentences(monkeypatch):
+    sp = Speaker(backend="none")
+    sp.player = _NullPlayer()
+    sp.player.written_total = sp.player.played_total = 0
+    spoken = []
+
+    def fake_synth(text):
+        spoken.append(text)
+        return np.zeros(100, dtype=np.float32), 16000
+
+    monkeypatch.setattr(sp, "_synth", fake_synth)
+    sp._timeline = [("First sentence.", 100), ("Second sentence.", 200)]
+    sp.player.played_total = 150  # interrupted during the second sentence
+    sp._queue("Third sentence.")
+    sp.pause_for_interrupt()
+    assert sp._resume_texts[0] == "Second sentence."
+    spoken.clear()
+    assert sp.resume_after_interrupt()
+    time.sleep(0.3)
+    assert spoken[:2] == ["Second sentence.", "Third sentence."]
