@@ -162,6 +162,8 @@ class ModelRouter:
             delay = 300.0
         else:
             delay = 45.0
+        if "has been started" in str(exc):
+            delay = 0.0  # Ollama was just auto-started: retry immediately
         self._cooldown[cand.key] = time.time() + delay
         self._health.pop(cand.provider, None)
         log.warning("model %s failed (%s); cooling down %.0fs", cand.key, exc, delay)

@@ -36,13 +36,45 @@ class OllamaProvider(Provider):
         self._caps: dict[str, set[str]] = {}
         self._models: tuple[float, list[str]] = (0.0, [])
 
-    def available(self) -> tuple[bool, str]:
+    def _ping(self) -> str | None:
         try:
             r = httpx.get(f"{self.base_url}/api/version", timeout=3)
             r.raise_for_status()
-            return True, f"ollama {r.json().get('version', '?')}"
-        except Exception as exc:  # noqa: BLE001
-            return False, f"Ollama not reachable at {self.base_url}: {exc.__class__.__name__}"
+            return str(r.json().get("version", "?"))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _autostart(self) -> bool:
+        """Launch a local Ollama server if it isn't running (e.g. after a reboot). At most once a minute."""
+        if "127.0.0.1" not in self.base_url and "localhost" not in self.base_url:
+            return False
+        if time.time() - getattr(self, "_last_autostart", 0.0) < 60:
+            return False
+        self._last_autostart = time.time()
+        import os
+        import shutil
+        import subprocess
+
+        exe = shutil.which("ollama") or os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe")
+        if not os.path.exists(exe):
+            return False
+        log.info("Ollama is not running - starting %s serve", exe)
+        subprocess.Popen([exe, "serve"], creationflags=0x08000000, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, close_fds=True)
+        for _ in range(20):
+            time.sleep(0.5)
+            if self._ping():
+                log.info("Ollama started")
+                return True
+        return False
+
+    def available(self) -> tuple[bool, str]:
+        version = self._ping()
+        if version is None and self._autostart():
+            version = self._ping()
+        if version is not None:
+            return True, f"ollama {version}"
+        return False, f"Ollama not reachable at {self.base_url} (start the Ollama app)"
 
     def list_models(self) -> list[str]:
         ts, cached = self._models
@@ -160,6 +192,8 @@ class OllamaProvider(Provider):
         except httpx.TimeoutException as exc:
             raise ProviderError(f"Ollama timed out after {timeout}s") from exc
         except httpx.TransportError as exc:
+            if self._autostart():
+                raise ProviderError("Ollama was not running; it has been started - retrying") from exc
             raise ProviderError(f"Ollama connection failed: {exc}") from exc
         text = _THINK_BLOCK.sub("", "".join(text_parts)).strip()
         return ChatResult(text=text, tool_calls=calls, provider=self.name, model=model, usage=usage)
