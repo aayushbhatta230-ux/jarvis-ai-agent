@@ -12,6 +12,7 @@ import logging
 import re
 import threading
 import time
+import webbrowser
 from typing import TYPE_CHECKING, Any
 
 from jarvis.tools.registry import ToolContext, ToolError, ToolResult, tool
@@ -196,6 +197,55 @@ def click_on_screen(ctx: ToolContext, label: str, double: bool = False) -> ToolR
         pyautogui.click(*match["center"], clicks=2 if double else 1, interval=0.08)
         return ToolResult(True, output=f"clicked '{match['text']}' (found by reading the screen)")
     raise ToolError(f"I can't see anything labelled '{label}' on screen")
+
+
+def youtube_lookup(query: str) -> tuple[str, str]:
+    """First YouTube result for a search: (video_id, title). No API key needed."""
+    import html as _html
+    from urllib.parse import quote_plus
+
+    import httpx
+
+    r = httpx.get("https://www.youtube.com/results?search_query=" + quote_plus(query),
+                  headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                         "(KHTML, like Gecko) Chrome/131.0 Safari/537.36",
+                           "Accept-Language": "en-US,en;q=0.9"}, timeout=15, follow_redirects=True)
+    r.raise_for_status()
+    for m in re.finditer(r'"videoRenderer":\{"videoId":"([\w-]{11})".{0,1500}?"title":\{"runs":\[\{"text":"(.*?)"\}',
+                         r.text, re.S):
+        import json as _json
+
+        try:
+            title = _json.loads('"' + m.group(2) + '"')
+        except ValueError:
+            title = m.group(2)
+        return m.group(1), _html.unescape(title)
+    m = re.search(r'"videoId":"([\w-]{11})"', r.text)
+    if not m:
+        raise ToolError(f"YouTube returned no results for '{query}'")
+    return m.group(1), query
+
+
+@tool("play_media", "Play a song, video, playlist or podcast by name: finds it on YouTube (or YouTube Music) and "
+      "starts it in the browser. Use for 'play X', 'put on some lofi', 'play the latest MKBHD video'.",
+      {"query": {"type": "string"}, "service": {"type": "string", "enum": ["youtube", "youtube_music"]}},
+      required=["query"], category="execute", group="live", timeout=45)
+def play_media(ctx: ToolContext, query: str, service: str = "youtube") -> ToolResult:
+    vid, title = youtube_lookup(query)
+    host = "music.youtube.com" if service == "youtube_music" else "www.youtube.com"
+    webbrowser.open(f"https://{host}/watch?v={vid}")
+    end = time.time() + 15
+    from jarvis.tools.desktop import list_top_windows
+
+    while time.time() < end:
+        if ctx.cancel.wait(0.7):
+            break
+        for w in list_top_windows():
+            if "youtube" in w["title"].lower() and w["process"].lower() in BROWSERS:
+                return ToolResult(True, output=f"Playing “{title}” on YouTube.",
+                                  data={"video_id": vid, "title": title, "window": w["title"], "verified": True})
+    return ToolResult(True, output=f"Opened “{title}” on YouTube (couldn't confirm the tab yet).",
+                      data={"video_id": vid, "title": title, "verified": False})
 
 
 class AdSkipWatcher:

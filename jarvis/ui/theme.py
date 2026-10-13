@@ -53,6 +53,8 @@ STYLESHEET = f"""
 * {{ font-family: {FONT}; color: {TEXT}; }}
 QWidget#Root {{ background: transparent; }}
 QFrame#Shell {{ background: {PANEL}; border: 1px solid {LINE}; border-radius: 18px; }}
+/* Scroll areas (e.g. Settings) otherwise get Windows' light-grey viewport, which hides our light text. */
+QScrollArea, QScrollArea > QWidget#qt_scrollarea_viewport, QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QLabel#Status {{ color: {DIM}; font-size: 11px; letter-spacing: 0.5px; }}
 QLabel#StateLabel {{ color: {TEXT}; font-size: 13px; font-weight: 600; letter-spacing: 1px; }}
 QLabel#Title {{ color: {CYAN}; font-size: 12px; font-weight: 700; letter-spacing: 4px; }}

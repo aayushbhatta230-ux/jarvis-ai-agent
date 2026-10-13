@@ -41,6 +41,7 @@ def config(home: Path):
     cfg.set("permissions.allowed_roots", [str(home.parent)], save=False)
     cfg.set("permissions.ask_timeout_seconds", 2, save=False)
     cfg.set("agent.concurrent_tasks", 2, save=False)
+    cfg.set("agent.brain", "local", save=False)  # never call the real Claude CLI from tests
     cfg.save()
     return cfg
 

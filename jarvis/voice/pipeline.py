@@ -52,6 +52,25 @@ _BACKCHANNEL_WORD = (
 _BACKCHANNEL = re.compile(r"(?i)^\s*" + _BACKCHANNEL_WORD + r"([\s.!?,]+" + _BACKCHANNEL_WORD + r")*[\s.!?,]*$")
 
 
+_ADDRESSED = re.compile(
+    r"(?i)(\?\s*$|^\s*(what|why|how|when|where|who|which|whose|can|could|would|will|should|do|does|did|is|are|am|"
+    r"tell|show|open|close|play|pause|stop|skip|search|find|send|text|email|call|remind|set|turn|make|write|read|"
+    r"check|explain|help|give|take|go|start|create|delete|move|copy|thanks|thank|yes|no|okay|ok|sure)\b|"
+    r"\b(you|your|jarvis|please|my screen|this|that)\b)")
+_HINGLISH = re.compile(r"(?i)\b(hai|nahi|nahin|kya|mein|ko|ka|ki|ke|yaar|bhai|kasam|haan|accha|achha|theek|kar|"
+                       r"raha|rahi|tha|thi|bol|bolo|dena|chal|abhi|mujhe|tum|tu|hum|aur|bhi|samajh\w*)\b")
+
+
+def looks_addressed(text: str) -> bool:
+    """In the follow-up window, only react to speech that sounds like it's meant for JARVIS."""
+    words = text.split()
+    if len(_HINGLISH.findall(text)) >= 2 and not re.search(r"(?i)\bjarvis\b", text):
+        return False  # a side conversation in Hindi/Nepali
+    if len(words) <= 2:
+        return bool(_ADDRESSED.search(text)) and not re.fullmatch(r"(?i)\s*(and|so|um+|uh+|the)\W*(and)?\W*", text)
+    return bool(_ADDRESSED.search(text)) or len(words) >= 6
+
+
 def is_backchannel(text: str) -> bool:
     """Short reactions that shouldn't cancel what JARVIS is saying."""
     t = (text or "").strip()
@@ -206,11 +225,12 @@ class VoiceManager:
 
     def follow_up(self) -> None:
         """Keep listening for a follow-up without the wake word."""
-        self._go_active(float(self.cfg.get("voice.follow_up_seconds", 10.0)))
+        self._go_active(float(self.cfg.get("voice.follow_up_seconds", 10.0)), reason="followup")
 
-    def _go_active(self, seconds: float) -> None:
+    def _go_active(self, seconds: float, reason: str = "wake") -> None:
         if self.mode != self.ACTIVE:
             self.vad.reset()
+        self._active_reason = reason
         self.mode = self.ACTIVE
         self._active_deadline = time.time() + seconds
         self.app.events.state(State.LISTENING, "listening")
@@ -508,6 +528,12 @@ class VoiceManager:
                                 speaker=verification.label())
         if not text:
             self.app.events.state(State.IDLE if self.wake else State.LISTENING)
+            return
+        reason = getattr(self, "_active_reason", "wake")
+        if reason == "followup" and self._wake_enabled() and not looks_addressed(text):
+            log.info("ignored side conversation in follow-up window: %r", text)
+            self.app.events.publish("voice.ignored", text=text)
+            self._go_passive()
             return
         self.on_utterance(text, verification)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import os
 import re
 import threading
 import time
@@ -110,6 +111,8 @@ class ScreenService:
         self._baseline: dict[str, np.ndarray] = {}
         self._baseline_text: dict[str, str] = {}
         self._last_fp: np.ndarray | None = None
+        self._alerted: dict[str, float] = {}  # normalised error line -> when we last alerted about it
+        self._window_alert_at: dict[str, float] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         _tesseract(app.config.get("screen.tesseract_path"))
@@ -208,8 +211,35 @@ class ScreenService:
                                 errors=len(errors))
         new_errors = [e for e in errors if e not in prev_errors]
         if new_errors and self.app.config.get("screen.observe") == "continuous":
-            self.app.events.publish("screen.alert", window=self.context.window_title, lines=new_errors[:3])
+            new_errors = self._worth_alerting(win, new_errors)
+            if new_errors:
+                self.app.events.publish("screen.alert", window=self.context.window_title, lines=new_errors[:3])
         return self.context
+
+    def _worth_alerting(self, win: dict[str, Any] | None, lines: list[str]) -> list[str]:
+        """Filter error lines down to ones the user hasn't already been told about.
+
+        Without this, JARVIS reads its own window (full of words like "failed") and its own
+        "Possible error" notifications, and OCR jitter makes the same line look new every scan.
+        """
+        if win and win.get("pid") == os.getpid():
+            return []
+        now = time.time()
+        title = win["title"] if win else ""
+        if now - self._window_alert_at.get(title, 0.0) < 60:  # at most one alert per window per minute
+            return []
+        self._alerted = {k: t for k, t in self._alerted.items() if now - t < 600}
+        fresh = []
+        for ln in lines:
+            if "possible error" in ln.lower():  # our own notification showing on screen
+                continue
+            key = re.sub(r"[^a-z]+", "", ln.lower())  # ignore digits/punctuation that OCR and clocks change
+            if key and key not in self._alerted:
+                self._alerted[key] = now
+                fresh.append(ln)
+        if fresh:
+            self._window_alert_at[title] = now
+        return fresh
 
     def analyze(self, question: str, region: str = "screen", cancel: Any = None) -> dict[str, Any]:
         """Answer a question about the screen using a vision model plus OCR."""

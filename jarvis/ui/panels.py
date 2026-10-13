@@ -727,6 +727,16 @@ class SettingsPanel(QScrollArea):
         lay.addLayout(f3)
         row = QHBoxLayout()
         row.addWidget(button("Check models", self._refresh_models))
+        row.addWidget(button("Connect Claude", self._connect_claude, "Primary"))
+        self.brain = QComboBox()
+        self.brain.addItems(["auto", "local"])
+        self.brain.setCurrentText(self.app.config.get("agent.brain", "auto"))
+        self.brain.setToolTip("auto: complex tasks use Claude Code (your Claude plan) when signed in; "
+                              "local: only the models on this laptop")
+        self.brain.currentTextChanged.connect(lambda v: (self.app.config.set("agent.brain", v),
+                                                         self._refresh_models()))
+        row.addWidget(QLabel("Task brain"))
+        row.addWidget(self.brain)
         row.addStretch(1)
         lay.addLayout(row)
 
@@ -786,6 +796,18 @@ class SettingsPanel(QScrollArea):
         lay.addStretch(1)
         self.update_voice_status()
         self._refresh_models()
+        # Scrolling the page must never change a setting: dropdowns/spinners ignore the wheel unless focused.
+        for w in body.findChildren(QComboBox) + body.findChildren(QSpinBox):
+            w.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            w.installEventFilter(self)
+
+    def eventFilter(self, obj: QObject, event: Any) -> bool:  # noqa: N802 - Qt API
+        from PySide6.QtCore import QEvent
+
+        if event.type() == QEvent.Type.Wheel and isinstance(obj, (QComboBox, QSpinBox)) and not obj.hasFocus():
+            event.ignore()
+            return True
+        return super().eventFilter(obj, event)
 
     # ---------------------------------------------------------------- helpers
     def _fill_devices(self) -> None:
@@ -892,13 +914,26 @@ class SettingsPanel(QScrollArea):
             self.update_voice_status()
 
     def _refresh_models(self) -> None:
-        run_bg(self.app.router.status, self._show_models)
+        def work() -> dict[str, Any]:
+            status = self.app.router.status()
+            status["_claude"] = self.app.claude.available(max_age=0)
+            return status
+
+        run_bg(work, self._show_models)
+
+    def _connect_claude(self) -> None:
+        try:
+            self.app.claude.login()
+            self.saved.setText("A window opened for Claude sign-in. Finish it in the browser, then click Check models.")
+        except Exception as exc:  # noqa: BLE001
+            self.saved.setText(f"Couldn't start Claude sign-in: {exc}")
 
     def _show_models(self, status: dict[str, Any] | None, err: Exception | None) -> None:
         if err or not status:
             self.models_info.setText(f"model check failed: {err}")
             return
-        lines = []
+        claude_ok, claude_why = status.pop("_claude", (False, "unknown"))
+        lines = [f"tasks   → {'Claude Code ✓' if claude_ok else 'local agent'} ({claude_why})"]
         options = {""}
         for role, rows in status.items():
             use = next((r["candidate"] for r in rows if r["ok"]), "NONE AVAILABLE")

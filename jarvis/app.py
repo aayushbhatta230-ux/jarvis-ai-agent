@@ -49,7 +49,8 @@ _ACTION_ANYWHERE = re.compile(
     r"|volume|create|make|write|save|delete|remove|move|rename|copy|find|search|download|install|run|fix|build"
     r"|commit|push|remind|schedule|type|click|press|scroll|minimi[sz]e|maximi[sz]e|lock|shut ?down|restart"
     r"|screenshot|my screen|on screen|switch to|go to|send|email|e-mail|mail|inbox|text|message|dm|instagram"
-    r"|whatsapp|reply|organi[sz]e|clean up|check)\b")
+    r"|whatsapp|reply|organi[sz]e|clean up|check|ram|cpu|gpu|battery|disk space|storage|memory usage|processes"
+    r"|news|latest|today'?s|weather|forecast|price|score|stock|which apps|what apps|open windows|downloads?)\b")
 # A chat reply must never claim to have done something: only the agent's verified tools can do that.
 _CLAIM = re.compile(
     r"(?i)\[\[|\b(i('ve| have)? (just )?(opened|closed|launched|started|created|deleted|removed|moved|saved|sent"
@@ -60,6 +61,12 @@ _SHARE_ON = re.compile(r"(?i)\b((start|begin|turn on|enable|start the) (screen ?
                        r"|share (my|the) screen|watch my screen|look at my screen live|go live on my screen)\b")
 _SHARE_OFF = re.compile(r"(?i)\b((stop|end|turn off|disable|quit) (the )?(screen ?shar\w*|sharing|watching( my)? "
                         r"screen)|stop looking at my screen)\b")
+_DENIAL = re.compile(
+    r"(?i)\b(i (can['’]?t|cannot|don['’]?t|do not|am not able to|['’]m not able to|am unable to|['’]m unable to) "
+    r"(directly )?(see|view|access|read|watch|control|open|play|click|check|browse|look up|search|get|fetch|"
+    r"monitor|do that|provide real)|(no|don['’]?t have|do not have) (direct )?(access|ability|permission)|"
+    r"not (even )?(if|when) you (share|enable)|i only (work with|hear|read)|as an ai|"
+    r"(can['’]?t|cannot) (browse|access) the (internet|web))")
 _DIRECT_ACK = {"play_pause": "Done.", "mute": "Toggled mute.", "fullscreen": "Toggled full screen.",
                "captions": "Toggled captions.", "forward": "Skipped ahead.", "back": "Went back.",
                "next": "Next one.", "previous": "Previous one.", "faster": "Speeding it up.",
@@ -94,6 +101,10 @@ _DIRECT_PATTERNS: list[tuple[re.Pattern[str], Any]] = [
      lambda m: ("scroll", {"amount": -5 if m.group(1) == "down" else 5})),
     (re.compile(r"(click|press|tap|hit)( on)?( the)? (.+?)( button| link| tab)?"),
      lambda m: ("click_on_screen", {"label": m.group(4)})),
+    (re.compile(r"(play|put on|start playing|listen to)( me)?( some| the song| the video| a song)? (.+?)"
+                r"( on (youtube music|yt music|youtube|yt))?"),
+     lambda m: ("play_media", {"query": m.group(4),
+                               "service": "youtube_music" if m.group(6) and "music" in m.group(6) else "youtube"})),
 ]
 
 
@@ -102,7 +113,8 @@ def quick_action(text: str) -> tuple[str, dict[str, Any]] | None:
     t = re.sub(r"(?i)\b(hey|hi|ok|okay|jarvis|please|can you|could you|would you|just|now|for me|quickly)\b[,]?",
                " ", text)
     t = re.sub(r"\s+", " ", t).strip(" ?.!,").lower()
-    if not t or len(t.split()) > 7:
+    t = re.sub(r"\s+(on|in) (my|the|this) (screen|browser|tab|page|chrome|laptop|computer|pc)$", "", t)
+    if not t or len(t.split()) > 8:
         return None
     for pattern, build in _DIRECT_PATTERNS:
         m = pattern.fullmatch(t)
@@ -137,6 +149,9 @@ class Jarvis:
         self.agent = AgentEngine(self)
         self.scheduler = Scheduler(self)
         self.diagnostics = Diagnostics(self)
+        from jarvis.agent.claude_brain import ClaudeBrain
+
+        self.claude = ClaudeBrain(self)
         self.voice: Any = None
         self.voice_error = ""
         self.session = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
@@ -399,19 +414,33 @@ class Jarvis:
         img, ocr = self.screen.latest_frame(max_age=2.0 if self.screen.sharing else 0.0)
         images: list[str] = []
         role = "chat"
+        clean = re.sub(r"\n\s*\n+", "\n", ocr).strip()
+        readable = len(re.findall(r"[A-Za-z]{3,}", clean))
+        from jarvis.tools.desktop import active_window, list_top_windows
+
+        try:
+            fg = active_window()
+            wins = [w["title"] for w in list_top_windows() if w["title"] and "jarvis" not in w["title"].lower()][:10]
+        except Exception:  # noqa: BLE001
+            fg, wins = None, []
+        wins_hint = bool(fg and len(fg["title"]) > 12)  # e.g. "Movie name - YouTube - Google Chrome"
         try:
             cand = self.router.resolve("vision")
             local_vision = self.router.providers[cand.provider].type == "ollama"
-            # A local vision model must swap in (10-60 s on this laptop); with OCR the chat model answers in ~2 s.
-            if not local_vision or re.search(r"(?i)\b(look like|colou?r|picture|image|photo|video|design|layout)\b",
-                                             text):
+            # A local vision model must swap in (10-60 s on this laptop), so only use it when text isn't enough:
+            # little readable text (a video, a photo, a game) or a question about how things look.
+            if not local_vision or (readable < 25 and not wins_hint) or re.search(
+                    r"(?i)\b(look like|colou?r|picture|image|photo|video|design|layout|who is|what is this)\b", text):
                 from jarvis.services.screen import to_b64_png
 
-                images, role = [to_b64_png(img, 1280)], "vision"
+                images, role = [to_b64_png(img, 1024 if local_vision else 1280)], "vision"
         except NoModelAvailable:
             pass
-        context = ("[What's on the user's screen right now - OCR text, may contain recognition errors]\n"
-                   + (re.sub(r"\n\s*\n+", "\n", ocr).strip()[:2500] or "(no readable text)"))
+        context = (f"[Foreground window: {fg['title'] if fg else '?'}]\n[Open windows: {' | '.join(wins)}]\n"
+                   "[Screen text (OCR, may contain recognition errors)]\n" + (clean[:2500] or "(almost no text - "
+                                                                               "probably a video or image)"))
+        if role == "vision":
+            self.events.publish("notice", text="Looking at the screen image - this takes a few seconds locally.")
         self._chat(text, source, role=role, images=images, extra=prompts.SCREEN_RULES + "\n\n" + context)
 
     def _chat(self, text: str, source: str, role: str = "chat", images: list[str] | None = None,
@@ -432,7 +461,12 @@ class Jarvis:
             ("What you remember:\n" + memory) if memory else "",
             ("The user is sharing their screen with you. Right now it shows:\n" + screen) if screen else "",
             extra]))
-        messages = [{"role": "system", "content": system}] + self.history[-12:]
+        # Small models copy their own earlier mistakes ("I can't see your screen") - keep those out of context,
+        # and give screen questions only the last exchange so the fresh capture dominates.
+        history = [m for m in self.history[-12:] if not (m["role"] == "assistant" and _DENIAL.search(m["content"]))]
+        if extra:
+            history = history[-3:]
+        messages = [{"role": "system", "content": system}] + history
         if images:
             messages[-1] = {**messages[-1], "images": images}
         buffer: list[str] = []
@@ -446,7 +480,7 @@ class Jarvis:
                 first_sentence_done = bool(re.search(r"[.!?\n]", head[8:])) or len(head) > 160
                 if not head or (len(head) < 10 and "[[ACTION]]".startswith(head)):
                     return  # could still be the hand-off marker: hold back
-                if head.startswith("[[") or _CLAIM.search(head):
+                if head.startswith("[[") or _CLAIM.search(head) or (not extra and _DENIAL.search(head)):
                     decided["action"] = True
                     return
                 if not first_sentence_done:
@@ -471,7 +505,7 @@ class Jarvis:
             self.events.publish("notice", text=str(exc)[:300])
             return
         reply = result.text.strip()
-        if decided["action"] or reply.startswith("[[") or _CLAIM.search(reply):
+        if decided["action"] or reply.startswith("[[") or _CLAIM.search(reply) or (not extra and _DENIAL.search(reply)):
             # The chat model tried to answer an action itself (it has no tools) - hand it to the agent.
             if speak:
                 self.voice.speaker.stop()

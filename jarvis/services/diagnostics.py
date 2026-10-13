@@ -184,6 +184,8 @@ class Diagnostics:
                   f"{len(self.app.scheduler.list(False))} active job(s)"),
             Check("services", "tools", READY, f"{len(self.app.tools.tools)} tools registered"),
             Check("services", "agent", READY, f"{len(self.app.agent.active())} active task(s)"),
+            Check("services", "Claude brain", READY if self.app.claude.available(max_age=0)[0] else DEGRADED,
+                  self.app.claude.available()[1], "Settings → Connect Claude (uses your Claude plan)"),
             Check("services", "external coding agent", READY if shutil.which("claude") else DEGRADED,
                   "claude CLI found" if shutil.which("claude") else "claude CLI not on PATH"),
         ]

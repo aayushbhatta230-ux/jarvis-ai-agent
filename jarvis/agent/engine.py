@@ -114,6 +114,9 @@ class TaskRun:
     failures_in_row: int = 0
     failed_calls: dict[str, int] = field(default_factory=dict)
     side_effect_pending: bool = False
+    used_tools: bool = False
+    nudged: bool = False
+    extra_tools: set[str] = field(default_factory=set)
     done: threading.Event = field(default_factory=threading.Event)
     answer: str | None = None
     answer_event: threading.Event = field(default_factory=threading.Event)
@@ -242,15 +245,19 @@ class AgentEngine:
     def _tools_for(self, run: TaskRun, local: bool) -> list[ToolSpec]:
         if not local:
             return CONTROL_TOOLS + self.app.tools.specs()
-        names = set(CORE_TOOLS)
-        specs = self.app.tools.specs(groups=run.groups) + self.app.tools.specs(names=names)
-        seen: set[str] = set()
-        unique = []
-        for s in specs:
-            if s.name not in seen:
-                seen.add(s.name)
-                unique.append(s)
-        return CONTROL_TOOLS + unique
+        # A small local model chooses far better from ~14 relevant tools than from 60+.
+        pool = {s.name: s for s in self.app.tools.specs(groups=run.groups) + self.app.tools.specs(names=set(CORE_TOOLS))}
+        goal_words = set(re.findall(r"[a-z]{3,}", run.goal.lower()))
+
+        def relevance(spec: ToolSpec) -> float:
+            words = set(re.findall(r"[a-z]{3,}", (spec.name.replace("_", " ") + " " + spec.description).lower()))
+            score = len(goal_words & words) + 2.5 * len(goal_words & set(spec.name.split("_")))
+            return score + (0.5 if spec.name in CORE_TOOLS else 0.0)
+
+        ranked = sorted(pool.values(), key=relevance, reverse=True)
+        limit = int(self.app.config.get("agent.local_tool_limit", 14))
+        chosen = ranked[:limit] + [pool[n] for n in run.extra_tools if n in pool and pool[n] not in ranked[:limit]]
+        return CONTROL_TOOLS + chosen
 
     @staticmethod
     def _trim(messages: list[dict[str, Any]], local: bool) -> list[dict[str, Any]]:
@@ -289,6 +296,8 @@ class AgentEngine:
         self._set_status(run, "running")
         role = "code" if "code" in run.groups else "agent"
         self.app.events.state(State.CODING if role == "code" else State.PROCESSING, run.goal[:80])
+        if run.step == 0 and self._run_with_claude(run):
+            return
         while run.step < max_steps:
             run.cancel.check()
             cand = self.app.router.resolve(role)
@@ -312,6 +321,17 @@ class AgentEngine:
                 if not text:
                     run.messages.append({"role": "user", "content": "Continue: call a tool, or task_complete if done."})
                     continue
+                if not run.used_tools and not run.nudged and _REFUSAL.search(text):
+                    # A small model claimed it can't do something it has tools for: push it to act.
+                    run.nudged = True
+                    names = ", ".join(t.name for t in tools if t.name not in ("update_plan", "task_complete",
+                                                                               "ask_user", "enable_tools"))
+                    run.messages.append({"role": "user", "content": (
+                        "You CAN do this - you control this computer through tools: " + names + ". "
+                        "Don't explain limitations; call the right tool now. If no listed tool fits, call "
+                        "enable_tools to load more.")})
+                    self._step(run, "thought", None, None, "nudged: model refused without trying tools", "ok")
+                    continue
                 status = "completed_unverified" if run.side_effect_pending else "completed"
                 self._finish(run, status, text)
                 return
@@ -321,6 +341,7 @@ class AgentEngine:
                 if call.name in ("update_plan", "task_complete", "ask_user", "enable_tools"):
                     finished = self._control(run, call.name, call.arguments, call.id) or finished
                     continue
+                run.used_tools = True
                 self._execute_tool(run, call.name, call.arguments, call.id)
             self._checkpoint(run)
             if finished:
@@ -331,6 +352,45 @@ class AgentEngine:
                 return
         self._finish(run, "failed", f"Stopped after {max_steps} steps without finishing. " + self._progress_note(run),
                      error="step limit")
+
+    def _run_with_claude(self, run: TaskRun) -> bool:
+        """Hand the task to Claude Code when it's signed in. Returns True if it finished the task."""
+        brain = getattr(self.app, "claude", None)
+        if brain is None:
+            return False
+        ok, why = brain.available()
+        if not ok:
+            return False
+        run.model = "claude-code"
+        self._publish(run)
+        self._step(run, "plan", None, None, "Using Claude for this task (with JARVIS's tools)", "ok")
+
+        def on_step(kind: str, tool: str | None, data: Any) -> None:
+            run.step += 1
+            if kind == "tool_call":
+                run.used_tools = True
+                self._step(run, "tool", tool, data if isinstance(data, dict) else None, "(called by Claude)", "ok")
+            else:
+                self._step(run, "thought", None, None, str(data)[:2000], "ok")
+                self.app.events.publish("agent.text", task_id=run.id, text=str(data))
+
+        try:
+            ok, text = brain.run(run.id, run.goal, [m for m in run.messages if m["role"] in ("user", "assistant")
+                                                     and not str(m.get("content", "")).startswith("(Recent")][:-1],
+                                 run.cancel, on_step)
+        except Cancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001 - fall back to the local agent
+            log.exception("Claude brain crashed")
+            ok, text = False, str(exc)
+        if ok and text:
+            self._finish(run, "completed" if run.used_tools or not _REFUSAL.search(text) else "completed_unverified",
+                         text)
+            return True
+        log.warning("Claude brain unavailable for this task (%s); using the local agent", text[:160])
+        self._step(run, "thought", None, None, f"Claude couldn't run ({text[:200]}); continuing locally", "ok")
+        run.model = ""
+        return False
 
     def _execute_tool(self, run: TaskRun, name: str, args: dict[str, Any], call_id: str) -> None:
         tool = self.app.tools.tools.get(name)
@@ -372,6 +432,7 @@ class AgentEngine:
         if name == "enable_tools":
             groups = {g for g in (args.get("groups") or []) if g in GROUP_KEYWORDS}
             run.groups |= groups
+            run.extra_tools |= {s.name for s in self.app.tools.specs(groups=groups)}
             run.messages.append({"role": "tool", "tool_call_id": call_id, "name": name,
                                  "content": f"enabled: {', '.join(sorted(run.groups))}"})
             return False
@@ -465,6 +526,12 @@ class AgentEngine:
             note += "Remaining: " + "; ".join(todo[:5]) + ". "
         return note + "You can say 'resume' to continue."
 
+
+_REFUSAL = re.compile(
+    r"(?i)\b(i (can['’]?t|cannot|am unable to|['’]m unable to|don['’]?t have (the ability|access|permission))|"
+    r"i do not have (the ability|access|permission)|(isn['’]?t|is not) possible for me|beyond my (abilities|"
+    r"capabilities)|as an ai|due to permissions|you (can|could|might want to|should) (try|open|use|go to|check|"
+    r"press))")
 
 _TOOL_CALL_TAG = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 _JSON_CALL = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```|^\s*(\{\s*\"name\".*\})\s*$", re.S)
