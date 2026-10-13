@@ -161,6 +161,7 @@ class ToolRegistry:
             communication,
             desktop,
             files,
+            live,
             memory_tools,
             productivity,
             research,

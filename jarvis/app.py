@@ -60,6 +60,57 @@ _SHARE_ON = re.compile(r"(?i)\b((start|begin|turn on|enable|start the) (screen ?
                        r"|share (my|the) screen|watch my screen|look at my screen live|go live on my screen)\b")
 _SHARE_OFF = re.compile(r"(?i)\b((stop|end|turn off|disable|quit) (the )?(screen ?shar\w*|sharing|watching( my)? "
                         r"screen)|stop looking at my screen)\b")
+_DIRECT_ACK = {"play_pause": "Done.", "mute": "Toggled mute.", "fullscreen": "Toggled full screen.",
+               "captions": "Toggled captions.", "forward": "Skipped ahead.", "back": "Went back.",
+               "next": "Next one.", "previous": "Previous one.", "faster": "Speeding it up.",
+               "slower": "Slowing it down.", "theater": "Toggled theater mode."}
+_DIRECT_PATTERNS: list[tuple[re.Pattern[str], Any]] = [
+    (re.compile(r"(auto(matically)?|always|keep) skip(ping)? (the )?ads?( for me)?( on)?|turn on (auto ?)?ad ?skip"),
+     lambda m: ("set_auto_skip_ads", {"on": True})),
+    (re.compile(r"(stop|don'?t|turn off) (auto(matically)? )?skip(ping)? (the )?ads?|turn off (auto ?)?ad ?skip"),
+     lambda m: ("set_auto_skip_ads", {"on": False})),
+    (re.compile(r"(skip|close|remove|get rid of) (this |the |that )?(ad|ads|advert|advertisement)s?"),
+     lambda m: ("skip_ad", {})),
+    (re.compile(r"(pause|resume|play|unpause|stop)( the| this)?( video| song| music| it| track)?"),
+     lambda m: ("video_control", {"action": "play_pause"})),
+    (re.compile(r"(un)?mute( the| this)?( video| tab| it)?"), lambda m: ("video_control", {"action": "mute"})),
+    (re.compile(r"(go |make it |exit |leave )?full ?screen"), lambda m: ("video_control", {"action": "fullscreen"})),
+    (re.compile(r"(turn (on|off) |show |hide )?(captions|subtitles)( on| off)?"),
+     lambda m: ("video_control", {"action": "captions"})),
+    (re.compile(r"(next|skip this) (video|song|track|one)|play (the )?next( one)?"),
+     lambda m: ("video_control", {"action": "next"})),
+    (re.compile(r"(previous|last) (video|song|track|one)"), lambda m: ("video_control", {"action": "previous"})),
+    (re.compile(r"(skip|go|jump|fast) (ahead|forward)( (\d+) seconds)?"),
+     lambda m: ("video_control", {"action": "forward", "times": max(1, int(m.group(4) or 10) // 10)})),
+    (re.compile(r"(rewind|go back|jump back)( (\d+) seconds)?"),
+     lambda m: ("video_control", {"action": "back", "times": max(1, int(m.group(3) or 10) // 10)})),
+    (re.compile(r"(speed (it )?up|play faster|faster)"), lambda m: ("video_control", {"action": "faster"})),
+    (re.compile(r"(slow (it )?down|play slower|slower)"), lambda m: ("video_control", {"action": "slower"})),
+    (re.compile(r"(turn |the )?volume (up|down)|(louder|quieter)"),
+     lambda m: ("media_control", {"action": "volume_up" if (m.group(2) == "up" or m.group(3) == "louder")
+                                  else "volume_down"})),
+    (re.compile(r"set (the )?volume to (\d{1,3})( percent| %)?"), lambda m: ("set_volume", {"level": int(m.group(2))})),
+    (re.compile(r"scroll (down|up)( a bit| more)?"),
+     lambda m: ("scroll", {"amount": -5 if m.group(1) == "down" else 5})),
+    (re.compile(r"(click|press|tap|hit)( on)?( the)? (.+?)( button| link| tab)?"),
+     lambda m: ("click_on_screen", {"label": m.group(4)})),
+]
+
+
+def quick_action(text: str) -> tuple[str, dict[str, Any]] | None:
+    """Map a short real-time command to a tool call, or None if it needs the full agent."""
+    t = re.sub(r"(?i)\b(hey|hi|ok|okay|jarvis|please|can you|could you|would you|just|now|for me|quickly)\b[,]?",
+               " ", text)
+    t = re.sub(r"\s+", " ", t).strip(" ?.!,").lower()
+    if not t or len(t.split()) > 7:
+        return None
+    for pattern, build in _DIRECT_PATTERNS:
+        m = pattern.fullmatch(t)
+        if m:
+            return build(m)
+    return None
+
+
 _STOP = re.compile(r"(?i)^\s*(stop|cancel|abort|never ?mind|shut up|be quiet|quiet|that'?s enough|enough)\W*$")
 _YES = re.compile(r"(?i)^\s*(yes|yeah|yep|sure|go ahead|do it|approve|approved|confirm|ok(ay)?|affirmative)\b")
 _NO = re.compile(r"(?i)^\s*(no|nope|don'?t|do not|deny|denied|cancel|stop|negative)\b")
@@ -113,6 +164,10 @@ class Jarvis:
         threading.Thread(target=self._warm_up, name="jarvis-warmup", daemon=True).start()
         threading.Thread(target=self._daily_maintenance, name="jarvis-maintenance", daemon=True).start()
         threading.Thread(target=self._keep_warm, name="jarvis-keep-warm", daemon=True).start()
+        if self.config.get("live.auto_skip_ads", False):
+            from jarvis.tools.live import AdSkipWatcher
+
+            AdSkipWatcher.ensure(self)
         self._ensure_briefing_job()
         if voice and self.config.get("voice.enabled", True):
             threading.Thread(target=self._start_voice, name="jarvis-voice-init", daemon=True).start()
@@ -267,11 +322,33 @@ class Jarvis:
         if self._is_screen_question(text):
             self._screen_chat(text, source)
             return
+        direct = quick_action(text)
+        if direct is not None:
+            self._run_direct(direct, text, source)
+            return
         if _ACTION.match(text) or _SCREENISH.search(text) or (len(text.split()) <= 16 and
                                                                _ACTION_ANYWHERE.search(text)):
             self._start_task(text, source)
             return
         self._chat(text, source)
+
+    def _run_direct(self, action: tuple[str, dict[str, Any]], text: str, source: str) -> None:
+        """Execute a recognised real-time command immediately (no planning round-trips) and report the result."""
+        tool, args = action
+        self.events.state(State.EXECUTING, tool)
+        t0 = time.time()
+        res = self.tools.execute(tool, args)
+        log.info("direct action %s%s -> %s in %.1fs", tool, args, "ok" if res.ok else res.error[:80], time.time() - t0)
+        if res.ok:
+            reply = res.output.split("\n")[0] if tool not in ("video_control",) else _DIRECT_ACK.get(
+                args.get("action", ""), "Done.")
+            self.events.state(State.COMPLETED, tool)
+        else:
+            reply = f"Couldn't do that: {res.error}"
+            self.events.state(State.RECOVERING, tool)
+        self.history.append({"role": "assistant", "content": reply})
+        self.memory.add_message(self.session, "assistant", reply, {"direct": tool, "ok": res.ok})
+        self.say(reply, speak=source == "voice")
 
     @staticmethod
     def _quick_answer(text: str) -> str:

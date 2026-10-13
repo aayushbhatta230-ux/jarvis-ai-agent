@@ -51,6 +51,8 @@ GROUP_KEYWORDS: dict[str, tuple[str, ...]] = {
                  "compare", "sources", "summari", "report", "latest", "price"),
     "productivity": ("remind", "schedule", "todo", "to-do", "to do", "deadline", "focus", "pomodoro", "briefing",
                      "every day", "daily", "draft", "note", "plan", "agenda", "unfinished", "next step"),
+    "live": ("skip", " ad", "video", "pause", "play", "mute", "full screen", "fullscreen", "next", "subtitle",
+             "caption", "click", "press the", "button", "rewind", "forward"),
     "comms": ("email", "e-mail", "mail", "inbox", "instagram", "insta", "dm", "message", "text ", "send",
               "reply to", "sorry note", "whatsapp"),
     "memory": ("remember", "forget", "recall", "preference", "last time", "previous", "history"),

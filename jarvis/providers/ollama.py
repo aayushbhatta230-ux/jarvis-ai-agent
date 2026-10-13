@@ -132,9 +132,37 @@ class OllamaProvider(Provider):
             out.append(msg)
         return out
 
+    def free_vram(self, keep: str) -> list[str]:
+        """Unload every other model so `keep` fits on a small GPU (6 GB can't hold chat + vision together)."""
+        unloaded = []
+        try:
+            for m in self.running():
+                name = m.get("name") or m.get("model", "")
+                if name and name != keep and name != f"{keep}:latest":
+                    httpx.post(f"{self.base_url}/api/generate", json={"model": name, "keep_alive": 0}, timeout=15)
+                    unloaded.append(name)
+        except Exception:  # noqa: BLE001
+            log.debug("could not unload models", exc_info=True)
+        if unloaded:
+            log.info("freed GPU memory by unloading %s", ", ".join(unloaded))
+        return unloaded
+
     def chat(self, messages: list[dict[str, Any]], model: str, tools: list[ToolSpec] | None = None,
              on_text: StreamCallback | None = None, cancel: CancelToken | None = None,
              timeout: float = 120.0, max_tokens: int = 2048, temperature: float = 0.4) -> ChatResult:
+        try:
+            return self._chat(messages, model, tools, on_text, cancel, timeout, max_tokens, temperature)
+        except ProviderError as exc:
+            if "out of memory" not in str(exc).lower():
+                raise
+            log.warning("GPU out of memory running %s - unloading other models and retrying", model)
+            self.free_vram(model)
+            time.sleep(1.0)
+            return self._chat(messages, model, tools, on_text, cancel, timeout, max_tokens, temperature)
+
+    def _chat(self, messages: list[dict[str, Any]], model: str, tools: list[ToolSpec] | None,
+              on_text: StreamCallback | None, cancel: CancelToken | None, timeout: float, max_tokens: int,
+              temperature: float) -> ChatResult:
         body: dict[str, Any] = {
             "model": model,
             "messages": self._convert(messages),
