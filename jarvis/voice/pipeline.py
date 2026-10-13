@@ -71,6 +71,12 @@ def looks_addressed(text: str) -> bool:
     return bool(_ADDRESSED.search(text)) or len(words) >= 6
 
 
+WAKE_UP = re.compile(r"(?i)\b((start|resume|begin) listening|listen (to me )?again|wake up|i'?m back|"
+                     r"you can listen( now)?|start hearing)\b")
+SLEEP = re.compile(r"(?i)\b((stop|pause|quit|end) listening|go to sleep|sleep mode|don'?t listen|stop hearing|"
+                   r"take a break|mute yourself)\b")
+
+
 def is_backchannel(text: str) -> bool:
     """Short reactions that shouldn't cancel what JARVIS is saying."""
     t = (text or "").strip()
@@ -127,6 +133,7 @@ class VoiceManager:
         self._reopen = threading.Event()
         self._last_frame = time.time()
         self.muted = False
+        self.sleeping = False  # "stop listening" mode
         self.input_device: devices.Device | None = None
         self.output_device: devices.Device | None = None
         self.hotplug = devices.HotplugWatcher(self._on_hotplug)
@@ -203,12 +210,30 @@ class VoiceManager:
             "speaker_id_mode": self.cfg.get("voice.speaker_id.mode", "enforce"),
             "wake_trained": bool(self.wake_aliases),
             "muted": self.muted,
+            "listening": not self.sleeping,
         }
 
     # ------------------------------------------------------------- controls
     def push_to_talk(self) -> None:
+        if self.sleeping:  # pressing talk is an explicit "I want you" - wake up
+            self.set_sleeping(False)
         self.interrupt()
         self._go_active(8.0)
+
+    def set_sleeping(self, sleeping: bool) -> None:
+        """Stop / start listening. While asleep the mic stays open only to hear 'start listening'."""
+        self.sleeping = sleeping
+        self._reset_segment()
+        self._interrupted = False
+        self.mode = self.PASSIVE
+        if sleeping:
+            self.app.events.state(State.PAUSED, "not listening")
+        else:
+            self._go_passive()
+            if not self._wake_enabled():
+                self.app.events.state(State.LISTENING, "listening")
+        self.app.events.publish("voice.listening", on=not sleeping)
+        self._publish_status()
 
     def interrupt(self) -> None:
         if self.speaker.speaking:
@@ -225,6 +250,8 @@ class VoiceManager:
 
     def follow_up(self) -> None:
         """Keep listening for a follow-up without the wake word."""
+        if self.sleeping:
+            return
         self._go_active(float(self.cfg.get("voice.follow_up_seconds", 10.0)), reason="followup")
 
     def _go_active(self, seconds: float, reason: str = "wake") -> None:
@@ -294,6 +321,13 @@ class VoiceManager:
 
     def _handle(self, frame: np.ndarray) -> None:
         self._recent.append(frame)
+        if self.sleeping:
+            # Not listening: only phrases like "start listening" / "wake up" are checked, nothing else is acted on.
+            prob = self.vad(frame)
+            score = self.wake.process(frame) if self.wake is not None else 0.0
+            self.mode = self.PASSIVE
+            self._track_passive(frame, prob, score)
+            return
         if self.mode == self.PASSIVE and not self._wake_enabled():
             self._go_passive()  # switched to always-listening at runtime
         speaking = self.speaker.speaking
@@ -367,7 +401,8 @@ class VoiceManager:
         if self._passive_speech and (self._passive_quiet > 18 or too_long):
             seconds = self._passive_speech * FRAME_S
             cloud = self.cfg.get("voice.wake_check", "cloud") == "cloud"
-            candidate = cloud or self._passive_best >= float(self.cfg.get("voice.wake_confirm_threshold", 0.08))
+            candidate = cloud or self.sleeping or self._passive_best >= float(
+                self.cfg.get("voice.wake_confirm_threshold", 0.08))
             if self._passive_speech > 8 and seconds <= 7 and candidate:
                 log.info("phrase heard (%.1fs, wake score %.2f) - checking for the wake word", seconds,
                          self._passive_best)
@@ -452,6 +487,13 @@ class VoiceManager:
         t = time.time()
         text, conf, engine = self.stt.transcribe(audio)
         stt_s = time.time() - t
+        if self.sleeping:
+            if WAKE_UP.search(text or ""):
+                log.info("wake-up phrase while not listening: %r", text)
+                self.app.set_listening(True, source="voice")
+            else:
+                log.info("not listening - ignored: %r", text)
+            return
         if not has_wake_word(text, self.wake_aliases):
             log.info("not the wake word (%s %.1fs): %r", engine, stt_s, text)
             return

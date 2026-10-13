@@ -149,6 +149,7 @@ def _bare_voice_manager(app):
     vm._tap = None
     vm._speech_end = 0.0
     vm._interrupted = False
+    vm.sleeping = False
     vm.output_device = None
     vm._jobs = queue.Queue()
     vm._enroll_sink = None
@@ -368,3 +369,47 @@ def test_speaker_pause_and_resume_keeps_unspoken_sentences(monkeypatch):
     assert sp.resume_after_interrupt()
     time.sleep(0.3)
     assert spoken[:2] == ["Second sentence.", "Third sentence."]
+
+
+def test_stop_and_start_listening(app):
+    from jarvis.voice.pipeline import SLEEP, WAKE_UP, VoiceManager
+
+    for t in ("stop listening", "Jarvis, go to sleep", "pause listening for a while"):
+        assert SLEEP.search(t), t
+    for t in ("start listening", "wake up jarvis", "I'm back", "you can listen now"):
+        assert WAKE_UP.search(t), t
+    vm = _bare_voice_manager(app)
+    vm._wake_enabled = lambda: True
+    vm.sleeping = False
+    vm._publish_status = lambda: None
+    vm.status = lambda: {}
+    heard, woke = [], []
+    vm.on_utterance = lambda text, v: heard.append(text)
+    app.set_listening = lambda on, source="": (woke.append(on), vm.set_sleeping(not on))
+
+    class STT:
+        def __init__(self, t):
+            self.t = t
+
+        def transcribe(self, audio, **kw):
+            return self.t, 0.9, "fake"
+
+    vm.set_sleeping(True)
+    assert vm.sleeping and vm.mode == VoiceManager.PASSIVE
+    vm.follow_up()
+    assert vm.mode == VoiceManager.PASSIVE                  # no follow-up window while asleep
+    vm.stt = STT("Hey Jarvis open chrome")
+    vm._confirm_wake(np.zeros(16000, np.float32))
+    assert heard == [] and vm.sleeping                       # ignored while not listening
+    vm.stt = STT("okay start listening")
+    vm._confirm_wake(np.zeros(16000, np.float32))
+    assert woke == [True] and not vm.sleeping
+
+
+def test_listening_commands_are_handled_immediately(app):
+    calls = []
+    app.set_listening = lambda on, source="": calls.append(on)
+    app.submit_input("stop listening", "voice")
+    app.submit_input("start listening", "text")
+    assert calls == [False, True]
+    assert app._inputs.empty()  # never reached the model

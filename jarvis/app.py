@@ -261,7 +261,33 @@ class Jarvis:
             self.stop_everything()
             self.events.publish("user.message", text=text, source=source)
             return
+        from jarvis.voice.pipeline import SLEEP, WAKE_UP
+
+        if len(text.split()) <= 7 and (SLEEP.search(text) or WAKE_UP.search(text)):
+            self.events.publish("user.message", text=text, source=source)
+            self.set_listening(not SLEEP.search(text), source=source)
+            return
         self._inputs.put((text, source))
+
+    @property
+    def listening(self) -> bool:
+        return self.voice is None or not self.voice.sleeping
+
+    def set_listening(self, on: bool, source: str = "ui") -> None:
+        """Start / stop listening (voice command, button, tray or Ctrl+Alt+M)."""
+        if self.voice is None:
+            self.events.publish("notice", text="Voice isn't running, so there's nothing to start or stop.")
+            return
+        if self.voice.sleeping == (not on):
+            return
+        if on:
+            self.voice.set_sleeping(False)
+            self.say("I'm listening again.", speak=True)
+        else:
+            self.voice.interrupt()
+            self.say("Okay, I'll stop listening. Say “start listening” when you need me.", speak=True)
+            self.voice.set_sleeping(True)
+        log.info("listening %s (%s)", "on" if on else "off", source)
 
     def stop_everything(self) -> None:
         self._chat_cancel.cancel("stopped by user")
@@ -557,7 +583,9 @@ class Jarvis:
             self.notify("Scheduled task failed", f"{d.get('goal', '')[:80]}: {result[:200]}")
 
     def _on_tts_idle(self, ev: Any) -> None:
-        if self.voice is not None and not self.busy():
+        if self.voice is not None and self.voice.sleeping:
+            self.events.state(State.PAUSED, "not listening")
+        elif self.voice is not None and not self.busy():
             self.voice.follow_up()
 
     def _on_permission_request(self, ev: Any) -> None:

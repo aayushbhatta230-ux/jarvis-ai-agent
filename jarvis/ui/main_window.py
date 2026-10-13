@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer
@@ -191,12 +192,14 @@ class MainWindow(QWidget):
         for action, default, alt, cb in (("summon", "ctrl+alt+j", "ctrl+shift+j", self.toggle_visible),
                                          ("listen", "ctrl+alt+l", "ctrl+shift+space", self.listen),
                                          ("command", "ctrl+alt+k", "ctrl+shift+k", self.focus_input),
-                                         ("cancel", "ctrl+alt+x", "ctrl+shift+x", self.app.stop_everything)):
+                                         ("cancel", "ctrl+alt+x", "ctrl+shift+x", self.app.stop_everything),
+                                         ("toggle_listening", "ctrl+alt+m", "ctrl+shift+m", self.toggle_listening)):
             for combo in (hk.get(action, default), default, alt):
                 if self.hotkeys.register(combo, cb):
                     self.hotkey_labels[action] = combo
                     break
-        missing = [a for a in ("summon", "listen", "command", "cancel") if a not in self.hotkey_labels]
+        missing = [a for a in ("summon", "listen", "command", "cancel", "toggle_listening")
+                   if a not in self.hotkey_labels]
         self.hotkeys.failed = missing
         if self.hotkeys.failed:
             self.show_notice(f"Hotkeys unavailable (in use by another app): {', '.join(self.hotkeys.failed)}")
@@ -324,6 +327,9 @@ class MainWindow(QWidget):
             act = QAction(text, menu)
             act.triggered.connect(cb)
             menu.addAction(act)
+        self.listen_action = QAction("Stop listening  (Ctrl+Alt+M)", menu)
+        self.listen_action.triggered.connect(self.toggle_listening)
+        menu.addAction(self.listen_action)
         self.mute_action = QAction("Mute microphone", menu, checkable=True)
         self.mute_action.triggered.connect(lambda checked: self.set_muted(checked))
         menu.addAction(self.mute_action)
@@ -372,6 +378,13 @@ class MainWindow(QWidget):
         if self.app.voice.muted:
             self.set_muted(False)
         self.app.voice.push_to_talk()
+
+    def toggle_listening(self) -> None:
+        if self.app.voice is None:
+            self.show_notice("Voice isn't running.")
+            return
+        on = self.app.voice.sleeping  # asleep -> start listening, and vice versa
+        threading.Thread(target=self.app.set_listening, args=(on, "ui"), daemon=True).start()
 
     def focus_input(self) -> None:
         self.show_window()
@@ -432,7 +445,9 @@ class MainWindow(QWidget):
             s = v.status()
             mic = s["input"] or "no microphone"
             parts.append(("🔇 muted · " if s["muted"] else "") + ("🎧 " if s["input_is_headset"] else "⚠ ") + mic)
-            if s["wake_word"]:
+            if not s.get("listening", True):
+                parts.insert(0, "💤 Not listening — say “start listening” or press Ctrl+Alt+M")
+            elif s["wake_word"]:
                 parts.append("“Hey JARVIS”")
             if self._speaker_label:
                 parts.append(self._speaker_label)
@@ -485,6 +500,9 @@ class MainWindow(QWidget):
             elif t == "notice":
                 self.show_notice(d["text"])
             elif t in ("voice.ready", "voice.status"):
+                self._refresh_status()
+            elif t == "voice.listening":
+                self.listen_action.setText(("Stop listening" if d["on"] else "Start listening") + "  (Ctrl+Alt+M)")
                 self._refresh_status()
             elif t == "voice.error":
                 self.show_notice(f"Voice problem ({d['where']}): {d['error'][:160]}")

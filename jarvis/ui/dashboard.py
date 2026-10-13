@@ -264,6 +264,11 @@ class HoloDashboard(QWidget):
         self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status.setWordWrap(True)
         centre.addWidget(self.status)
+        self.listen_btn = QPushButton("🎙  Stop listening")
+        self.listen_btn.setToolTip("Stop / start listening (Ctrl+Alt+M) - or say “stop listening” / “start listening”")
+        self.listen_btn.setFixedWidth(190)
+        self.listen_btn.clicked.connect(self._toggle_listening)
+        centre.addWidget(self.listen_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         grid.addLayout(centre, 0, 1)
 
         # ---------- right column
@@ -562,6 +567,12 @@ class HoloDashboard(QWidget):
         elif t in ("notify", "screen.alert"):
             self._event_line(f"{d.get('title', d.get('window', ''))}: {d.get('message', ' '.join(d.get('lines', [])))[:90]}",
                              theme.AMBER)
+        elif t == "voice.listening":
+            self.listen_btn.setText("🎙  Stop listening" if d["on"] else "💤  Start listening")
+            self.listen_btn.setObjectName("" if d["on"] else "Primary")
+            self.listen_btn.style().unpolish(self.listen_btn)
+            self.listen_btn.style().polish(self.listen_btn)
+            self._event_line("listening " + ("on" if d["on"] else "paused - say “start listening”"), theme.CYAN)
         elif t == "screen.frame":
             from PySide6.QtGui import QPixmap
 
@@ -625,6 +636,13 @@ class HoloDashboard(QWidget):
             self.app.agent.unpause(run.id)
         else:
             self.app.agent.pause(run.id)
+
+    def _toggle_listening(self) -> None:
+        voice = self.app.voice
+        if voice is None:
+            self.chat.add_system("Voice isn't running.")
+            return
+        threading.Thread(target=self.app.set_listening, args=(voice.sleeping, "ui"), daemon=True).start()
 
     def _toggle_share(self, on: bool) -> None:
         self.share_btn.setText("Stop sharing" if on else "Share screen")
