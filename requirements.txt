@@ -15,7 +15,7 @@ sounddevice>=0.4.6
 onnxruntime>=1.17          # wake word, VAD, speaker recognition
 faster-whisper>=1.0        # local speech-to-text (tokenizer shim handles blocked native DLLs)
 SpeechRecognition>=3.10    # online STT fallback
-edge-tts>=6.1              # neural voice
+edge-tts>=7.3.1              # neural voice (Sec-MS-GEC handshake fix)
 miniaudio>=1.59            # MP3 decode for edge-tts
 
 ## Screen & automation

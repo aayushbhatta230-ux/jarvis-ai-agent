@@ -30,7 +30,7 @@ requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26", "httpx>=0.27", "psutil>=5.9", "pywin32>=306", "comtypes>=1.2", "PySide6>=6.6",
   "sounddevice>=0.4.6", "onnxruntime>=1.17", "faster-whisper>=1.0", "SpeechRecognition>=3.10",
-  "edge-tts>=6.1", "miniaudio>=1.59", "mss>=9.0", "pillow>=10.0", "pytesseract>=0.3.10",
+  "edge-tts>=7.3.1", "miniaudio>=1.59", "mss>=9.0", "pillow>=10.0", "pytesseract>=0.3.10",
   "uiautomation>=2.0", "pycaw>=20240210", "pyautogui>=0.9.54", "pyperclip>=1.8", "pypdf>=4.0",
   "python-docx>=1.1", "beautifulsoup4>=4.12", "send2trash>=1.8",
 ]
@@ -38,7 +38,7 @@ dependencies = [
 [project.optional-dependencies]
 voice = [
   "faster-whisper>=0.9",
-  "edge-tts>=6.1",
+  "edge-tts>=7.3.1",
   "pydub>=0.25",
 ]
 embeddings = [

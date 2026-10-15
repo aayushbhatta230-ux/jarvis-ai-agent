@@ -231,6 +231,7 @@ class Speaker:
         self._busy = threading.Event()
         self.last_engine = ""
         self._edge_failures = 0
+        self._last_edge_failure = 0.0
         self._cache: dict[str, tuple[np.ndarray, int]] = {}
         self._timeline: list[tuple[str, int]] = []  # (sentence, player sample position where it ends)
         self._resume_texts: list[str] = []
@@ -347,7 +348,9 @@ class Speaker:
         return self._synth_uncached(text)
 
     def _synth_uncached(self, text: str) -> tuple[np.ndarray, int]:
-        if self.primary is not None and self._edge_failures < 3:
+        now = time.time()
+        can_retry_edge = self._edge_failures < 3 or (now - self._last_edge_failure > 60.0)
+        if self.primary is not None and can_retry_edge:
             try:
                 pcm = self.primary.synth(text)
                 self._edge_failures = 0
@@ -355,6 +358,7 @@ class Speaker:
                 return pcm, self.primary.rate
             except Exception as exc:  # noqa: BLE001 - offline or service hiccup: fall back
                 self._edge_failures += 1
+                self._last_edge_failure = now
                 log.warning("edge-tts failed (%s); falling back to Windows voice", exc)
         self.last_engine = "sapi"
         return self.fallback.synth(text), self.fallback.rate
