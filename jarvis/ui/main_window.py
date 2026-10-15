@@ -564,15 +564,23 @@ class MainWindow(QWidget):
 
 def run(app: Jarvis, voice: bool = True) -> int:
     import sys
+    from PySide6.QtNetwork import QLocalServer
 
     qt = QApplication.instance() or QApplication(sys.argv)
     qt.setQuitOnLastWindowClosed(False)
     qt.setApplicationName("JARVIS")
     win = MainWindow(app)
     win.show()
+
+    ipc_server = QLocalServer()
+    ipc_server.removeServer("jarvis-single-instance")
+    ipc_server.newConnection.connect(lambda: (win.show_window(), win.activateWindow()))
+    ipc_server.listen("jarvis-single-instance")
+
     app.start(voice=voice)
     QTimer.singleShot(1200, win._refresh_status)
     code = qt.exec()
+    ipc_server.close()
     app.shutdown()
     return code
 

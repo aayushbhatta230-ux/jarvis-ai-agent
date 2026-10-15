@@ -52,8 +52,28 @@ def main(argv: list[str] | None = None) -> int:
 
     mutex = _single_instance()
     if mutex is None:
-        log.error("JARVIS is already running (use Ctrl+Alt+J to summon it).")
-        return 2
+        try:
+            from PySide6.QtCore import QCoreApplication
+            from PySide6.QtNetwork import QLocalSocket
+
+            _qt_app = QCoreApplication.instance() or QCoreApplication(sys.argv)
+            sock = QLocalSocket()
+            sock.connectToServer("jarvis-single-instance")
+            if sock.waitForConnected(1500):
+                sock.write(b"summon")
+                sock.waitForBytesWritten(1000)
+                sock.disconnectFromServer()
+        except Exception:
+            pass
+        try:
+            hwnd = ctypes.windll.user32.FindWindowW(None, "JARVIS")
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 9)
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        log.info("JARVIS is already running; summoned window.")
+        return 0
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:  # noqa: BLE001 - already set by Qt or unsupported
