@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvis-ai-agent"
-version = "3.1.0"
-description = "JARVIS - Local-first AI assistant with voice and web interface"
+version = "4.0.0"
+description = "JARVIS - autonomous Windows desktop AI assistant (voice, agent, screen, memory)"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -28,22 +28,17 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-  "numpy>=1.24",
-  "sounddevice>=0.4.6",
-  "speechrecognition>=3.10",
-  "webrtcvad>=2.0.10",
-  "psutil>=5.9",
-  "pillow>=10.0",
-  "mss>=9.0",
-  "pywin32>=306",
-  "comtypes>=1.2",
-  "ollama>=0.3",
+  "numpy>=1.26", "httpx>=0.27", "psutil>=5.9", "pywin32>=306", "comtypes>=1.2", "PySide6>=6.6",
+  "sounddevice>=0.4.6", "onnxruntime>=1.17", "faster-whisper>=1.0", "SpeechRecognition>=3.10",
+  "edge-tts>=7.3.1", "miniaudio>=1.59", "mss>=9.0", "pillow>=10.0", "pytesseract>=0.3.10",
+  "uiautomation>=2.0", "pycaw>=20240210", "pyautogui>=0.9.54", "pyperclip>=1.8", "pypdf>=4.0",
+  "python-docx>=1.1", "beautifulsoup4>=4.12", "send2trash>=1.8",
 ]
 
 [project.optional-dependencies]
 voice = [
   "faster-whisper>=0.9",
-  "edge-tts>=6.1",
+  "edge-tts>=7.3.1",
   "pydub>=0.25",
 ]
 embeddings = [
@@ -59,6 +54,9 @@ dev = [
   "ruff>=0.1",
 ]
 
+[project.gui-scripts]
+jarvis = "jarvis.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/aayushbhatta230-ux/jarvis-ai-agent"
 Repository = "https://github.com/aayushbhatta230-ux/jarvis-ai-agent"
@@ -66,7 +64,7 @@ Issues = "https://github.com/aayushbhatta230-ux/jarvis-ai-agent/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "voice*", "interface*", "tools*", "vision*", "tests*"]
+include = ["jarvis*", "core*", "voice*", "interface*", "tools*", "vision*"]
 
 [tool.ruff]
 line-length = 100
@@ -82,7 +80,6 @@ ignore = ["E501", "SIM102", "SIM103", "T201", "T203"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
-indent-width = 4
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -91,6 +88,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = ["e2e: end-to-end tests needing a running Ollama"]
 filterwarnings = [
   "ignore::DeprecationWarning",
 ]

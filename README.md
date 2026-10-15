@@ -1,7 +1,17 @@
 <div align="center">
 
 # ⚡ JARVIS
-### Autonomous Local-First AI Computer Companion & Remote Control Agent
+#> ## JARVIS v4 (current)
+> The assistant has been rebuilt as a native Windows desktop app: holographic humanoid interface, headset-first
+> voice with real-time recognition of your voice, an autonomous plan→act→verify agent with 88 tools, persistent
+> memory, screen understanding, a coding agent, research and a scheduler.
+> **Install:** `powershell -ExecutionPolicy Bypass -File scripts\install.ps1` · **Run:** `python -m jarvis`
+> (or the JARVIS shortcut) · **Full guide:** [docs/JARVIS_V4.md](docs/JARVIS_V4.md)
+>
+> The sections below describe the legacy v0.1 app (`python main.py --legacy`). It exposes an unauthenticated
+> remote-control server through a public tunnel — see the security notes in the v4 guide.
+
+## Autonomous Local-First AI Computer Companion & Remote Control Agent
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![CI: Passing](https://img.shields.io/badge/CI-Passing-10b981?style=flat&logo=githubactions&logoColor=white)](https://github.com/aayushbhatta230-ux/jarvis-ai-agent/actions)

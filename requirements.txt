@@ -1,52 +1,43 @@
-# JARVIS Dependencies
+# JARVIS v4 dependencies (Python 3.11-3.13, Windows 10/11)
 
 ## Core
-numpy>=1.24.0
-sounddevice>=0.4.6
-speechrecognition>=3.10.0
-webrtcvad>=2.0.10
-psutil>=5.9.0
-pillow>=10.0.0
-mss>=9.0.0
+numpy>=1.26
+httpx>=0.27
+psutil>=5.9
 pywin32>=306
-comtypes>=1.2.0
-requests>=2.31.0
+comtypes>=1.2
 
-## LLM
-ollama>=0.3.0
+## Desktop UI
+PySide6>=6.6
 
-## Desktop automation
+## Voice
+sounddevice>=0.4.6
+onnxruntime>=1.17          # wake word, VAD, speaker recognition
+faster-whisper>=1.0        # local speech-to-text (tokenizer shim handles blocked native DLLs)
+SpeechRecognition>=3.10    # online STT fallback
+edge-tts>=7.3.1              # neural voice (Sec-MS-GEC handshake fix)
+miniaudio>=1.59            # MP3 decode for edge-tts
+
+## Screen & automation
+mss>=9.0
+pillow>=10.0
+pytesseract>=0.3.10        # needs Tesseract OCR installed (UB Mannheim build)
+uiautomation>=2.0
+pycaw>=20240210
 pyautogui>=0.9.54
+pyperclip>=1.8
+
+## Documents & research
+pypdf>=4.0
+python-docx>=1.1
+beautifulsoup4>=4.12
+send2trash>=1.8
+
+## Legacy app (legacy_main.py) only
+ollama>=0.3
 pygetwindow>=0.0.9
-pyperclip>=1.8.2
 pywinctl>=0.3.4
 
-## Documents
-python-docx>=1.1.0
-pypdf>=4.0.0
-send2trash>=1.8.3
-
-# Web
-# Uses stdlib only (http.server, urllib, json, threading)
-
-# Optional - for enhanced features
-# faster-whisper>=0.9.0  # Local STT fallback
-# edge-tts>=6.1.0       # Neural TTS
-# pydub>=0.25.1         # Audio conversion
-# openai>=1.0.0         # OpenAI embeddings
-# chromadb>=0.4.0       # Vector DB
-# faiss-cpu>=1.7.4      # Vector search
-# pytesseract>=0.3.10   # OCR (also needs the Tesseract binary)
-# yt-dlp>=2024.1.0      # Media download
-# PySide6>=6.6.0        # Desktop overlay UI
-# PyOpenGL>=3.1.7       # Desktop overlay rendering
-# opencv-python>=4.9   # Screen recording
-
-# Testing
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-asyncio>=0.21.0
-pytest-mock>=3.11.0
-
-# Linting
-ruff>=0.1.0
+## Development
+pytest>=8.0
+ruff>=0.4
